@@ -1,0 +1,61 @@
+@* Teljes képernyős háttéranimáció a tartalom mögött. A rajzolás a wwwroot/js/ambient.js-ben van. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ThemeService Themes
+@inject WeatherService Weather
+
+<canvas @ref="_canvas" class="ambient-bg" aria-hidden="true"></canvas>
+
+@code {
+    private ElementReference _canvas;
+    private IJSObjectReference? _module;
+    private int? _weatherCode;
+    private string? _lastKey;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/ambient.js");
+        _weatherCode = (await Weather.GetCachedAsync())?.Days.FirstOrDefault()?.Code;
+        Themes.Changed += Restart;
+        Weather.Updated += OnWeather;
+        await StartAsync();
+    }
+
+    private void OnWeather(WeatherForecast f)
+    {
+        _weatherCode = f.Days.FirstOrDefault()?.Code;
+        Restart();
+    }
+
+    private void Restart() => InvokeAsync(StartAsync);
+
+    private async Task StartAsync()
+    {
+        if (_module is null) return;
+        var opts = new
+        {
+            mode = Themes.Animation.ToString(),
+            theme = Themes.Current.Id.ToString().ToLowerInvariant(),
+            weatherCode = _weatherCode,
+        };
+        var key = $"{opts.mode}|{opts.theme}|{opts.weatherCode}";
+        if (key == _lastKey) return; // ugyanaz: nem indítjuk újra
+        _lastKey = key;
+        try { await _module.InvokeVoidAsync("start", _canvas, opts); }
+        catch (JSDisconnectedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Themes.Changed -= Restart;
+        Weather.Updated -= OnWeather;
+        if (_module is null) return;
+        try
+        {
+            await _module.InvokeVoidAsync("stop");
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+    }
+}

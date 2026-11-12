@@ -1,0 +1,66 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_title" Label="Megnevezés" Required="true" MaxLength="200" AutoFocus="true" Placeholder="pl. Olajcsere" />
+        <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="2" MaxLength="2000" />
+        <MudNumericField @bind-Value="_interval" Label="Ismétlődés (hónap)" Min="1" Max="240"
+                         HelperText="@IntervalHelp" />
+        <MudDatePicker @bind-Date="_next" Label="Következő esedékesség" Editable="true" DateFormat="yyyy.MM.dd" Required="true" />
+        <MudNumericField @bind-Value="_lead" Label="Ennyi nappal előtte kerüljön a mátrixba" Min="0" Max="365" />
+        <MudSwitch @bind-Value="_active" Label="Aktív" Color="Color.Primary" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save"
+                   Disabled="_busy || string.IsNullOrWhiteSpace(_title) || _next is null">Mentés</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TemplateDto? Template { get; set; }
+
+    private string? _title;
+    private string? _notes;
+    private int _interval = 12;
+    private DateTime? _next = DateTime.Today.AddMonths(1);
+    private int _lead = 14;
+    private bool _active = true;
+    private bool _busy;
+
+    private string IntervalHelp => _interval % 12 == 0 ? $"= {_interval / 12} évente" : $"{_interval} havonta";
+
+    public static async Task<bool> ShowAsync(IDialogService dialogs, TemplateDto? template)
+    {
+        var parameters = new DialogParameters<TemplateEditDialog> { { x => x.Template, template } };
+        var dialog = await dialogs.ShowAsync<TemplateEditDialog>(template is null ? "Új ismétlődő feladat" : "Ismétlődő feladat", parameters);
+        return await dialog.Result is { Canceled: false };
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Template is null) return;
+        _title = Template.Title;
+        _notes = Template.Notes;
+        _interval = Template.IntervalMonths;
+        _next = Format.ToDateTime(Template.NextDueDate);
+        _lead = Template.LeadDays;
+        _active = Template.IsActive;
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            var dto = new TemplateEditDto(_title!.Trim(), _notes, _interval, Format.ToDateOnly(_next)!.Value, _lead, _active);
+            if (Template is null) await Api.PostAsync<TemplateDto>("api/templates", dto);
+            else await Api.PutAsync<TemplateDto>($"api/templates/{Template.Id}", dto);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

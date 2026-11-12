@@ -1,0 +1,114 @@
+@page "/ismetlodo"
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@inject UndoSnackbar Undo
+
+<PageTitle>Ismétlődő feladatok – Ada</PageTitle>
+<div class="d-flex align-center mb-2">
+    <MudText Typo="Typo.h5">Ismétlődő feladatok</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add">Új</MudButton>
+</div>
+
+@if (_items is null)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_items.Count == 0)
+{
+    <MudText Typo="Typo.body2">Még nincs ismétlődő feladat. Pl. olajcsere 12 havonta, kazán karbantartás évente.</MudText>
+}
+else
+{
+    @foreach (var t in _items)
+    {
+        var days = t.NextDueDate.DayNumber - _today.DayNumber;
+        <MudPaper Elevation="1" Class="@($"pa-3 mb-2 {(t.IsActive ? "" : "stale")}")">
+            <div class="d-flex align-center gap-2">
+                <div class="flex-grow-1" style="min-width:0">
+                    <MudText Typo="Typo.subtitle1"><b>@t.Title</b> @if (!t.IsActive) { <MudChip T="string" Size="Size.Small">inaktív</MudChip> }</MudText>
+                    <MudText Typo="Typo.body2" Class="@(days < 0 ? "overdue" : "")">
+                        Esedékes: @Format.Date(t.NextDueDate) · @Format.Relative(days)
+                    </MudText>
+                    <MudText Typo="Typo.caption">
+                        @(t.IntervalMonths % 12 == 0 ? $"{t.IntervalMonths / 12} évente" : $"{t.IntervalMonths} havonta") ·
+                        @t.LeadDays nappal előtte jelenik meg
+                    </MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" title="Elvégezve" OnClick="() => Complete(t)" />
+                <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                    <MudMenuItem OnClick="() => Edit(t)">Szerkesztés</MudMenuItem>
+                    <MudMenuItem OnClick="() => ToggleLog(t)">Napló</MudMenuItem>
+                    <MudMenuItem OnClick="() => Delete(t)">Törlés</MudMenuItem>
+                </MudMenu>
+            </div>
+            @if (_logs.TryGetValue(t.Id, out var log))
+            {
+                <MudDivider Class="my-2" />
+                @if (log.Count == 0)
+                {
+                    <MudText Typo="Typo.caption">Még nincs bejegyzés.</MudText>
+                }
+                @foreach (var e in log)
+                {
+                    <MudText Typo="Typo.caption" Class="d-block">
+                        <b>@Format.Date(e.CompletedOn)</b> (esedékes: @Format.Date(e.DueDate))@(e.Note is null ? "" : $" – {e.Note}")
+                    </MudText>
+                }
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<TemplateDto>? _items;
+    private readonly Dictionary<int, List<CompletionLogDto>> _logs = [];
+    private DateOnly _today = DateOnly.FromDateTime(DateTime.Today);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _items = await Api.GetAsync<List<TemplateDto>>("api/templates"); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items ??= []; }
+    }
+
+    private async Task Add()
+    {
+        if (await TemplateEditDialog.ShowAsync(Dialogs, null)) await Load();
+    }
+
+    private async Task Edit(TemplateDto t)
+    {
+        if (await TemplateEditDialog.ShowAsync(Dialogs, t)) await Load();
+    }
+
+    private async Task Complete(TemplateDto t)
+    {
+        if (!await CompleteOccurrenceDialog.ShowAsync(Dialogs, t, _today)) return;
+        _logs.Remove(t.Id);
+        await Load();
+        Undo.Show($"Kész: {t.Title}", () => Api.PostAsync<TemplateDto>($"api/templates/{t.Id}/undo-last"), async () =>
+        {
+            _logs.Remove(t.Id);
+            await Load();
+            StateHasChanged();
+        });
+    }
+
+    private async Task ToggleLog(TemplateDto t)
+    {
+        if (_logs.Remove(t.Id)) return;
+        try { _logs[t.Id] = await Api.GetAsync<List<CompletionLogDto>>($"api/templates/{t.Id}/log"); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Delete(TemplateDto t)
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Törlés", $"Törlöd: „{t.Title}”? A napló is törlődik, a már létrehozott feladatok megmaradnak.",
+                yesText: "Törlés", cancelText: "Mégse") != true) return;
+        try { await Api.DeleteAsync($"api/templates/{t.Id}"); await Load(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

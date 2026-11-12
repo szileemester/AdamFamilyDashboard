@@ -1,0 +1,66 @@
+@page "/kesz"
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>Kész feladatok – Ada</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-2">Kész feladatok</MudText>
+
+<MudTextField @bind-Value="_query" Placeholder="Keresés…" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              DebounceInterval="400" OnDebounceIntervalElapsed="_ => Load()" Immediate="true" Clearable="true" Class="mb-2" />
+
+@if (_items is null)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_items.Count == 0)
+{
+    <MudText Typo="Typo.caption">Nincs találat.</MudText>
+}
+else
+{
+    <MudPaper Elevation="1" Class="pa-2">
+        @foreach (var t in _items)
+        {
+            <div class="task-row">
+                <div class="task-title">
+                    <MudText Typo="Typo.body2" Style="text-decoration:line-through">@t.Title</MudText>
+                    <MudText Typo="Typo.caption">Kész: @t.CompletedAt?.ToLocalTime().ToString("yyyy. MM. dd. HH:mm")</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small" title="Visszanyitás" OnClick="() => Reopen(t)" />
+                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" Size="Size.Small" Color="Color.Error" title="Végleges törlés" OnClick="() => Delete(t)" />
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    private string? _query;
+    private List<TaskDto>? _items;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            var q = string.IsNullOrWhiteSpace(_query) ? "" : $"?q={Uri.EscapeDataString(_query)}";
+            _items = (await Api.GetAsync<List<TaskDto>>($"api/tasks/completed{q}"));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items ??= []; }
+    }
+
+    private async Task Reopen(TaskDto t)
+    {
+        try { await Api.PostAsync<TaskDto>($"api/tasks/{t.Id}/reopen"); await Load(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Delete(TaskDto t)
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Végleges törlés", $"„{t.Title}” véglegesen törlődik. Ez nem vonható vissza.",
+                yesText: "Törlés", cancelText: "Mégse") != true) return;
+        try { await Api.DeleteAsync($"api/tasks/{t.Id}"); await Load(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

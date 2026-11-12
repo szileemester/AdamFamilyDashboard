@@ -1,0 +1,82 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Név" Required="true" MaxLength="200" AutoFocus="true" />
+        <div class="d-flex gap-2">
+            <MudSelect T="int" @bind-Value="_month" Label="Hónap" Style="flex:2">
+                @for (var m = 1; m <= 12; m++)
+                {
+                    var month = m;
+                    <MudSelectItem Value="month">@MonthName(month)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudNumericField @bind-Value="_day" Label="Nap" Min="1" Max="31" Style="flex:1" />
+            <MudNumericField @bind-Value="_year" Label="Év (opc.)" Min="1900" Max="2100" Clearable="true" Style="flex:1.3" />
+        </div>
+        <MudTextField @bind-Value="_notes" Label="Megjegyzés (pl. ajándékötlet)" Lines="2" MaxLength="1000" />
+    </DialogContent>
+    <DialogActions>
+        @if (Birthday is not null)
+        {
+            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="Delete">Törlés</MudButton>
+        }
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="_busy || string.IsNullOrWhiteSpace(_name)">Mentés</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public BirthdayDto? Birthday { get; set; }
+
+    private string? _name;
+    private int _month = DateTime.Today.Month;
+    private int _day = DateTime.Today.Day;
+    private int? _year;
+    private string? _notes;
+    private bool _busy;
+
+    public static string MonthName(int m) => new DateTime(2024, m, 1).ToString("MMMM");
+
+    public static async Task<bool> ShowAsync(IDialogService dialogs, BirthdayDto? birthday)
+    {
+        var parameters = new DialogParameters<BirthdayEditDialog> { { x => x.Birthday, birthday } };
+        var dialog = await dialogs.ShowAsync<BirthdayEditDialog>(birthday is null ? "Új születésnap" : "Születésnap", parameters);
+        return await dialog.Result is { Canceled: false };
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Birthday is null) return;
+        (_name, _month, _day, _year, _notes) = (Birthday.Name, Birthday.Month, Birthday.Day, Birthday.Year, Birthday.Notes);
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            var dto = new BirthdayEditDto(_name!.Trim(), _month, _day, _year, _notes);
+            if (Birthday is null) await Api.PostAsync<BirthdayDto>("api/birthdays", dto);
+            else await Api.PutAsync<BirthdayDto>($"api/birthdays/{Birthday.Id}", dto);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Törlés", $"Törlöd: {Birthday!.Name}?", yesText: "Törlés", cancelText: "Mégse") != true) return;
+        try
+        {
+            await Api.DeleteAsync($"api/birthdays/{Birthday.Id}");
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

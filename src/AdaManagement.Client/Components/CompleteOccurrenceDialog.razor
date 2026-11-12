@@ -1,0 +1,55 @@
+@* Egy ismétlődő alkalom teljesítése: mikor lett kész, megjegyzés (km, költség…), következő esedékesség (fix ütemezés, átírható). *@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">Esedékes volt: <b>@Format.Date(Template.NextDueDate)</b></MudText>
+        <MudDatePicker @bind-Date="_completedOn" Label="Elvégezve" Editable="true" DateFormat="yyyy.MM.dd" />
+        <MudTextField @bind-Value="_note" Label="Megjegyzés (pl. km-állás, költség)" Lines="2" MaxLength="1000" />
+        <MudDatePicker @bind-Date="_next" Label="Következő esedékesség" Editable="true" DateFormat="yyyy.MM.dd"
+                       HelperText="@($"Fix ütemezés szerint: {Format.Date(Template.SuggestedFollowingDueDate)}")" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Color="Color.Success" Variant="Variant.Filled" OnClick="Save" Disabled="_busy || _completedOn is null || _next is null">Kész</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public TemplateDto Template { get; set; } = default!;
+    [Parameter] public DateOnly Today { get; set; }
+
+    private DateTime? _completedOn;
+    private DateTime? _next;
+    private string? _note;
+    private bool _busy;
+
+    public static async Task<bool> ShowAsync(IDialogService dialogs, TemplateDto template, DateOnly today)
+    {
+        var parameters = new DialogParameters<CompleteOccurrenceDialog> { { x => x.Template, template }, { x => x.Today, today } };
+        var dialog = await dialogs.ShowAsync<CompleteOccurrenceDialog>($"Kész: {template.Title}", parameters);
+        var result = await dialog.Result;
+        return result is { Canceled: false };
+    }
+
+    protected override void OnInitialized()
+    {
+        _completedOn = Format.ToDateTime(Today == default ? DateOnly.FromDateTime(DateTime.Today) : Today);
+        _next = Format.ToDateTime(Template.SuggestedFollowingDueDate);
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            await Api.PostAsync<TemplateDto>($"api/templates/{Template.Id}/complete",
+                new CompleteOccurrenceDto(Format.ToDateOnly(_completedOn)!.Value, Format.ToDateOnly(_next)!.Value, _note));
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

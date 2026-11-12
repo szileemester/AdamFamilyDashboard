@@ -1,0 +1,107 @@
+@page "/szuletesnapok"
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>Születésnapok – Ada</PageTitle>
+<div class="d-flex align-center mb-2 gap-2">
+    <MudText Typo="Typo.h5">Születésnapok</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Upload" OnClick="() => _showImport = !_showImport">Import</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add">Új</MudButton>
+</div>
+
+@if (_showImport)
+{
+    <MudPaper Class="pa-3 mb-3" Outlined="true">
+        <MudText Typo="Typo.body2">
+            CSV (soronként <code>Név;Dátum</code>, a dátum lehet <code>1990-01-05</code>, <code>01-05</code> vagy <code>01.05</code>) vagy vCard (.vcf) fájl.
+            A már meglévő név + dátum párosokat kihagyja.
+        </MudText>
+        <InputFile OnChange="Import" accept=".csv,.txt,.vcf" class="mt-2" />
+    </MudPaper>
+}
+
+@if (_items is null)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_items.Count == 0)
+{
+    <MudText Typo="Typo.body2">Még nincs születésnap felvéve.</MudText>
+}
+else
+{
+    <MudPaper Elevation="1" Class="pa-2">
+        @foreach (var b in Sorted)
+        {
+            <div class="task-row" style="cursor:pointer" @onclick="() => Edit(b.Item)">
+                <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Small" Class="mx-2" Color="@(b.Days == 0 ? Color.Secondary : Color.Default)" />
+                <div class="task-title">
+                    <MudText Typo="Typo.body2">@b.Item.Name @(b.Age is { } a ? $"({a})" : "")</MudText>
+                    <MudText Typo="Typo.caption">
+                        @BirthdayEditDialog.MonthName(b.Item.Month) @(b.Item.Day). · @Format.Relative(b.Days)@(b.Item.Notes is null ? "" : $" · {b.Item.Notes}")
+                    </MudText>
+                </div>
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    private List<BirthdayDto>? _items;
+    private bool _showImport;
+
+    // A következő előfordulás szerinti sorrend (Feb 29 → nem szökőévben Feb 28), kliensoldalon számolva.
+    private IEnumerable<(BirthdayDto Item, int Days, int? Age)> Sorted
+    {
+        get
+        {
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            return _items!.Select(b =>
+            {
+                var next = Next(b.Month, b.Day, today);
+                return (b, next.DayNumber - today.DayNumber, b.Year is { } y ? next.Year - y : (int?)null);
+            }).OrderBy(x => x.Item2).ThenBy(x => x.b.Name);
+        }
+    }
+
+    private static DateOnly Next(int month, int day, DateOnly today)
+    {
+        DateOnly In(int year) => month == 2 && day == 29 && !DateTime.IsLeapYear(year) ? new(year, 2, 28) : new(year, month, day);
+        var d = In(today.Year);
+        return d >= today ? d : In(today.Year + 1);
+    }
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _items = await Api.GetAsync<List<BirthdayDto>>("api/birthdays"); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items ??= []; }
+    }
+
+    private async Task Add()
+    {
+        if (await BirthdayEditDialog.ShowAsync(Dialogs, null)) await Load();
+    }
+
+    private async Task Edit(BirthdayDto b)
+    {
+        if (await BirthdayEditDialog.ShowAsync(Dialogs, b)) await Load();
+    }
+
+    private async Task Import(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 1_000_000));
+            var content = await reader.ReadToEndAsync();
+            var result = await Api.PostAsync<ImportResultDto>("api/birthdays/import", new ImportRequestDto(content));
+            Snackbar.Add($"Importálva: {result.Imported}, kihagyva: {result.Skipped}", Severity.Success);
+            _showImport = false;
+            await Load();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

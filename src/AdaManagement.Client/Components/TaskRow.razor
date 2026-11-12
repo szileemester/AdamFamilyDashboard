@@ -1,0 +1,42 @@
+@* Egy feladat sora: pipa, cím, határidő; teljes módban fontos/sürgős kapcsolók is. *@
+
+<div class="task-row">
+    <MudCheckBox T="bool" Value="false" ValueChanged="_ => OnComplete.InvokeAsync(Task)" Disabled="ReadOnly"
+                 Size="Size.Small" Color="Color.Success" aria-label="Kész" />
+    <div class="task-title" @onclick="() => { if (!ReadOnly) OnEdit.InvokeAsync(Task); }">
+        <MudText Typo="Typo.body2">
+            @Task.Title
+            @if (Task.RecurringTemplateId is not null)
+            {
+                <MudIcon Icon="@Icons.Material.Outlined.EventRepeat" Size="Size.Small" Class="mud-text-secondary" Style="vertical-align:middle;font-size:.95rem" Title="Ismétlődő" />
+            }
+        </MudText>
+        @if (Task.DueDate is { } due)
+        {
+            var days = due.DayNumber - Today.DayNumber;
+            <MudText Typo="Typo.caption" Class="@(days < 0 ? "overdue" : "mud-text-secondary")">
+                @(Compact ? Format.Relative(days) : $"{Format.Date(due)} · {Format.Relative(days)}")
+            </MudText>
+        }
+    </div>
+    @if (!Compact)
+    {
+        <MudToggleIconButton Toggled="Task.IsImportant" ToggledChanged="v => OnFlags.InvokeAsync((Task, v, Task.IsUrgent))"
+                             Icon="@Icons.Material.Outlined.StarOutline" ToggledIcon="@Icons.Material.Filled.Star"
+                             ToggledColor="Color.Primary" Size="Size.Small" Disabled="ReadOnly" title="Fontos" />
+        <MudToggleIconButton Toggled="Task.IsUrgent" ToggledChanged="v => OnFlags.InvokeAsync((Task, Task.IsImportant, v))"
+                             Icon="@Icons.Material.Outlined.Bolt" ToggledIcon="@Icons.Material.Filled.Bolt"
+                             ToggledColor="Color.Error" Size="Size.Small" Disabled="ReadOnly" title="Sürgős" />
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TaskDto Task { get; set; } = default!;
+    [Parameter] public DateOnly Today { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>Kompakt mód (bento csempe): kapcsolók nélkül, a jelölés a szerkesztő ablakban állítható.</summary>
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public EventCallback<TaskDto> OnComplete { get; set; }
+    [Parameter] public EventCallback<TaskDto> OnEdit { get; set; }
+    [Parameter] public EventCallback<(TaskDto Task, bool Important, bool Urgent)> OnFlags { get; set; }
+}

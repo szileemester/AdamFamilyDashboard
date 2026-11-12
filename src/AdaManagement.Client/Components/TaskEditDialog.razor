@@ -1,0 +1,88 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_title" Label="Cím" Required="true" MaxLength="200" AutoFocus="true" />
+        <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="3" MaxLength="2000" />
+        <MudDatePicker @bind-Date="_due" Label="Határidő (opcionális)" Clearable="true" Editable="true" DateFormat="yyyy.MM.dd" />
+        <div class="d-flex gap-4 mt-2">
+            <MudSwitch @bind-Value="_important" Label="Fontos" Color="Color.Primary" />
+            <MudSwitch @bind-Value="_urgent" Label="Sürgős" Color="Color.Error" />
+        </div>
+        @if (Task?.RecurringTemplateId is not null)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Ismétlődő feladatból generálva. A törlés az alkalom kihagyását jelenti.</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (Task is not null)
+        {
+            <MudButton Color="Color.Error" OnClick="Delete" StartIcon="@Icons.Material.Filled.Delete">
+                @(Task.RecurringTemplateId is null ? "Törlés" : "Kihagyás")
+            </MudButton>
+        }
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="string.IsNullOrWhiteSpace(_title) || _busy">Mentés</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TaskDto? Task { get; set; }
+
+    private string? _title;
+    private string? _notes;
+    private DateTime? _due;
+    private bool _important;
+    private bool _urgent;
+    private bool _busy;
+
+    public static async Task<bool> ShowAsync(IDialogService dialogs, TaskDto? task)
+    {
+        var parameters = new DialogParameters<TaskEditDialog> { { x => x.Task, task } };
+        var dialog = await dialogs.ShowAsync<TaskEditDialog>(task is null ? "Új feladat" : "Feladat szerkesztése", parameters);
+        var result = await dialog.Result;
+        return result is { Canceled: false };
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Task is null) return;
+        _title = Task.Title;
+        _notes = Task.Notes;
+        _due = Format.ToDateTime(Task.DueDate);
+        _important = Task.IsImportant;
+        _urgent = Task.IsUrgent;
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            var dto = new TaskEditDto(_title!.Trim(), _notes, _important, _urgent, Format.ToDateOnly(_due));
+            if (Task is null) await Api.PostAsync<TaskDto>("api/tasks", dto);
+            else await Api.PutAsync<TaskDto>($"api/tasks/{Task.Id}", dto);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        var question = Task!.RecurringTemplateId is null
+            ? "Biztosan törlöd a feladatot?"
+            : "Kihagyod ezt az alkalmat? Az ismétlődő feladat a következő esedékességre lép, napló nélkül.";
+        if (await Dialogs.ShowMessageBoxAsync("Megerősítés", question, yesText: "Igen", cancelText: "Mégse") != true) return;
+        try
+        {
+            await Api.DeleteAsync($"api/tasks/{Task.Id}");
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

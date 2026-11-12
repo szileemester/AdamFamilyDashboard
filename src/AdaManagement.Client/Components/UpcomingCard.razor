@@ -1,0 +1,66 @@
+@* „Közelgő” sáv: születésnapok (előrejelzési ablakon belül) és esedékes karbantartások.
+   Meleg témában chipek, Bento-ban csempe, Csendesben kártya nélküli lista, Világosban kártya. *@
+
+@if (Theme == AppTheme.Meleg)
+{
+    <div class="mb-1">
+        @if (Birthdays.Count == 0 && Maintenance.Count == 0)
+        {
+            <span class="up-chip mud-text-secondary">Nincs semmi a láthatáron</span>
+        }
+        @foreach (var m in Maintenance)
+        {
+            <span class="@($"up-chip {(m.DaysUntil < 0 ? "overdue" : "")}")">🔧 @m.Title · @Format.Relative(m.DaysUntil)</span>
+        }
+        @foreach (var b in Birthdays)
+        {
+            <span class="up-chip">🎂 @b.Name@(b.TurningAge is { } a ? $" ({a})" : "") · @Format.Relative(b.DaysUntil)</span>
+        }
+    </div>
+    return;
+}
+
+<div class="@WrapperClass" style="height:100%">
+    <MudText Typo="@(Theme == AppTheme.Vilagos ? Typo.subtitle1 : Typo.caption)" Class="@(Theme == AppTheme.Vilagos ? "d-block" : "d-block mud-text-secondary")">
+        @if (Theme == AppTheme.Vilagos) { <b>Közelgő</b> } else { <span>Közelgő</span> }
+    </MudText>
+
+    @if (Birthdays.Count == 0 && Maintenance.Count == 0)
+    {
+        <MudText Typo="Typo.caption">Nincs semmi a láthatáron.</MudText>
+    }
+
+    @foreach (var m in Maintenance)
+    {
+        <div class="d-flex align-center gap-2 py-1">
+            <MudIcon Icon="@Icons.Material.Filled.Build" Size="Size.Small" Color="@(m.DaysUntil < 0 ? Color.Error : Color.Primary)" />
+            <MudText Typo="Typo.body2" Class="flex-grow-1">@m.Title</MudText>
+            <MudText Typo="Typo.caption" Class="@(m.DaysUntil < 0 ? "overdue" : "")">@Format.Relative(m.DaysUntil)</MudText>
+        </div>
+    }
+
+    @foreach (var b in Birthdays)
+    {
+        <div class="d-flex align-center gap-2 py-1">
+            <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Small" Color="@(b.DaysUntil == 0 ? Color.Secondary : Color.Default)" />
+            <MudText Typo="Typo.body2" Class="flex-grow-1">
+                @if (b.DaysUntil == 0) { <b>@b.Name</b> } else { @b.Name }
+                @if (b.TurningAge is { } age) { <span class="mud-text-secondary"> (@age)</span> }
+            </MudText>
+            <MudText Typo="Typo.caption">@b.Date.ToString("MMM d.") · @Format.Relative(b.DaysUntil)</MudText>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<UpcomingBirthdayDto> Birthdays { get; set; } = [];
+    [Parameter] public IReadOnlyList<UpcomingMaintenanceDto> Maintenance { get; set; } = [];
+    [Parameter] public AppTheme Theme { get; set; }
+
+    private string WrapperClass => Theme switch
+    {
+        AppTheme.Bento => "tile tile-up",
+        AppTheme.Csendes => "up-plain",
+        _ => "mud-paper mud-elevation-1 pa-3",
+    };
+}

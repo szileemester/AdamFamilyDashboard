@@ -1,0 +1,130 @@
+@* Rövid időjárás blokk: ma + 2 nap, közvetlenül az Open-Meteótól (a szerver ébredését nem várja meg).
+   A megjelenés témánként más: egysoros (Csendes), nagy csempe (Bento), mondat (Meleg), kártya (Világos). *@
+@inject WeatherService Weather
+
+@if (_forecast is null)
+{
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">@(_error ?? "Időjárás betöltése…")</MudText>
+    return;
+}
+
+@{
+    var today = _forecast.Days[0];
+    var (todayIcon, todayText) = WeatherService.Describe(today.Code);
+    var label = Settings?.WeatherLabel ?? _forecast.Label;
+}
+
+@switch (Theme)
+{
+    case AppTheme.Csendes:
+        <div class="weather-line" title="@todayText">
+            <span class="wl-icon">@todayIcon</span>
+            <span class="wl-temp">@Math.Round(today.Max)°</span>
+            <span class="mud-text-secondary wl-text">@todayText.ToLowerInvariant() · @label</span>
+            <span class="wl-next">
+                @foreach (var (day, i) in Next())
+                {
+                    <span title="@WeatherService.Describe(day.Code).Text">@ShortDay(day.Date, i) @WeatherService.Describe(day.Code).Icon @Math.Round(day.Max)°</span>
+                }
+            </span>
+        </div>
+        break;
+
+    case AppTheme.Bento:
+        <div class="tile tile-weather" @onclick="() => Load(true)" title="Koppints a frissítéshez">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@label</MudText>
+            <div class="d-flex align-center gap-2">
+                <span style="font-size:2.2rem;line-height:1">@todayIcon</span>
+                <span class="big-temp">@Math.Round(today.Max)°</span>
+            </div>
+            <MudText Typo="Typo.caption">@todayText · min @Math.Round(today.Min)°</MudText>
+            <div class="d-flex gap-3 mt-1 mud-text-secondary" style="font-size:.75rem">
+                @foreach (var (day, i) in Next())
+                {
+                    <span>@ShortDay(day.Date, i) @WeatherService.Describe(day.Code).Icon @Math.Round(day.Max)°</span>
+                }
+            </div>
+        </div>
+        break;
+
+    case AppTheme.Meleg:
+        <div class="weather-sentence">
+            <span style="font-size:1.4rem">@todayIcon</span>
+            <span>
+                <b>@Math.Round(today.Max)°</b> és @todayText.ToLowerInvariant() odakint, @label.
+                <span class="mud-text-secondary">
+                    @string.Join(", ", Next().Select(x => $"{DayName(x.Day.Date, x.Index).ToLowerInvariant()} {WeatherService.Describe(x.Day.Code).Icon} {Math.Round(x.Day.Max)}°"))
+                </span>
+            </span>
+        </div>
+        break;
+
+    default:
+        <MudPaper Class="pa-3" Elevation="1" Style="height:100%">
+            <div class="d-flex align-center">
+                <MudText Typo="Typo.subtitle1"><b>@label</b></MudText>
+                <MudSpacer />
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="() => Load(true)" aria-label="Frissítés" />
+            </div>
+            <div class="d-flex justify-space-between mt-1">
+                @foreach (var (day, i) in _forecast.Days.Select((d, i) => (d, i)))
+                {
+                    var (icon, text) = WeatherService.Describe(day.Code);
+                    <div class="d-flex flex-column align-center" style="flex:1" title="@text">
+                        <MudText Typo="Typo.caption">@DayName(day.Date, i)</MudText>
+                        <span style="font-size:1.8rem;line-height:1.2">@icon</span>
+                        <MudText Typo="Typo.body2"><b>@Math.Round(day.Max)°</b> / @Math.Round(day.Min)°</MudText>
+                        <MudText Typo="Typo.caption">
+                            💧 @day.PrecipitationMm.ToString("0.#") mm@(day.PrecipitationProbability is { } p ? $" · {p}%" : "")
+                        </MudText>
+                    </div>
+                }
+            </div>
+        </MudPaper>
+        break;
+}
+
+@code {
+    [Parameter] public SettingsDto? Settings { get; set; }
+    [Parameter] public AppTheme Theme { get; set; }
+
+    private WeatherForecast? _forecast;
+    private string? _error;
+    private (double, double)? _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Settings is null) return;
+        var key = (Settings.Latitude, Settings.Longitude);
+        if (_loadedFor == key) return;
+        _loadedFor = key;
+
+        _forecast ??= await Weather.GetCachedAsync();
+        await Load(false);
+    }
+
+    private async Task Load(bool force)
+    {
+        if (Settings is null) return;
+        try
+        {
+            _forecast = await Weather.GetAsync(Settings.WeatherLabel, Settings.Latitude, Settings.Longitude, force);
+            _error = null;
+        }
+        catch
+        {
+            _error = "Az időjárás most nem érhető el.";
+        }
+    }
+
+    private IEnumerable<(WeatherDay Day, int Index)> Next() => _forecast!.Days.Select((d, i) => (d, i)).Skip(1);
+
+    private static string DayName(DateOnly d, int i) => i switch
+    {
+        0 => "Ma",
+        1 => "Holnap",
+        _ => d.ToString("dddd"),
+    };
+
+    private static string ShortDay(DateOnly d, int i) => i == 1 ? "holnap" : d.ToString("ddd").ToLowerInvariant();
+}

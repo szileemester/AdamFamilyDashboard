@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AdaManagement.Client/AdaManagement.Client.csproj" />
+    <Project Path="src/AdaManagement.Server/AdaManagement.Server.csproj" />
+    <Project Path="src/AdaManagement.Shared/AdaManagement.Shared.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AdaManagement.Tests/AdaManagement.Tests.csproj" />
+  </Folder>
+</Solution>

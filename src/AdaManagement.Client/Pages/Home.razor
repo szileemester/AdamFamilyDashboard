@@ -1,0 +1,151 @@
+﻿@page "/"
+@inject ApiClient Api
+@inject LocalCache Cache
+@inject ISnackbar Snackbar
+@inject ThemeService Themes
+@implements IDisposable
+
+<PageTitle>Ada</PageTitle>
+
+@if (_data is null)
+{
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-2">@_error</MudAlert>
+        <MudButton OnClick="Refresh" Variant="Variant.Outlined">Újra</MudButton>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        <MudText Typo="Typo.caption">Kapcsolódás a szerverhez… (alvó szervernél ez fél percig is tarthat)</MudText>
+    }
+}
+else
+{
+    @if (_stale)
+    {
+        <MudAlert Severity="@(_error is null ? Severity.Info : Severity.Warning)" Dense="true" Class="mb-2"
+                  Icon="@Icons.Material.Filled.CloudSync">
+            @if (_error is null)
+            {
+                <span>Mentett állapot, frissítés folyamatban… (addig csak olvasható)</span>
+            }
+            else
+            {
+                <span>Nem sikerült frissíteni: @_error</span>
+                <MudButton Size="Size.Small" OnClick="Refresh" Class="ml-2">Újra</MudButton>
+            }
+        </MudAlert>
+        <MudProgressLinear Indeterminate="@(_error is null)" Color="Color.Primary" Class="mb-2" />
+    }
+
+    var theme = Themes.Current.Id;
+    <div class="@(_stale ? "stale" : "")">
+        @switch (theme)
+        {
+            case AppTheme.Csendes:
+                <div class="day-head">
+                    <span class="day-title">Ma</span>
+                    <span class="mud-text-secondary">@_data.Today.ToString("MMMM d., dddd")</span>
+                </div>
+                <WeatherCard Settings="_data.Settings" Theme="theme" />
+                <div class="mb-2"><UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" /></div>
+                break;
+
+            case AppTheme.Meleg:
+                <div class="greeting">@Greeting</div>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@_data.Today.ToString("MMMM d., dddd")</MudText>
+                <WeatherCard Settings="_data.Settings" Theme="theme" />
+                <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" />
+                break;
+
+            case AppTheme.Bento:
+                <MudGrid Spacing="2" Class="mb-2">
+                    <MudItem xs="5" md="4">
+                        <WeatherCard Settings="_data.Settings" Theme="theme" />
+                    </MudItem>
+                    <MudItem xs="7" md="8">
+                        <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" />
+                    </MudItem>
+                </MudGrid>
+                break;
+
+            default:
+                <MudGrid Spacing="2" Class="mb-2">
+                    <MudItem xs="12" md="5">
+                        <WeatherCard Settings="_data.Settings" Theme="theme" />
+                    </MudItem>
+                    <MudItem xs="12" md="7">
+                        <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" />
+                    </MudItem>
+                </MudGrid>
+                break;
+        }
+
+        <Matrix Tasks="_tasks" Today="_data.Today" ReadOnly="_stale" OnChanged="Refresh" />
+    </div>
+}
+
+@code {
+    /// <summary>Napszakhoz illő köszönés (budapesti idő szerint a böngészőben).</summary>
+    private static string Greeting => DateTime.Now.Hour switch
+    {
+        < 10 => "Jó reggelt!",
+        < 18 => "Szép napot!",
+        _ => "Jó estét!",
+    };
+
+    private void OnThemeChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Themes.Changed -= OnThemeChanged;
+
+    private const string CacheKey = "ada.dashboard";
+    private DashboardDto? _data;
+    private List<TaskDto> _tasks = [];
+    private bool _stale;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Themes.Changed += OnThemeChanged;
+
+        // 1) Azonnal: az utolsó mentett állapot (csak olvasható).
+        var cached = await Cache.GetAsync<DashboardDto>(CacheKey);
+        if (cached is not null)
+        {
+            Set(cached);
+            _stale = true;
+            StateHasChanged();
+        }
+
+        // 2) Háttérben: friss adat (a szerver és az SQL akár percekig is ébredhet).
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        _error = null;
+        try
+        {
+            var fresh = await Api.GetAsync<DashboardDto>("api/dashboard");
+            Set(fresh);
+            _stale = false;
+            await Cache.SetAsync(CacheKey, fresh);
+        }
+        catch (ApiException ex) when (ex.Message == "Bejelentkezés szükséges.")
+        {
+            // átirányítás folyamatban
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            if (_data is not null) _stale = true;
+        }
+    }
+
+    private void Set(DashboardDto d)
+    {
+        _data = d;
+        _tasks = d.OpenTasks.ToList();
+    }
+}

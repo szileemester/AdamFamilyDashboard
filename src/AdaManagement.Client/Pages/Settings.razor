@@ -1,0 +1,126 @@
+@page "/beallitasok"
+@inject ApiClient Api
+@inject WeatherService Weather
+@inject ISnackbar Snackbar
+@inject ThemeService Themes
+@implements IDisposable
+
+<PageTitle>Beállítások – Ada</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-2">Beállítások</MudText>
+
+@if (_settings is null)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-3 mb-3" Elevation="1">
+        <MudText Typo="Typo.subtitle1"><b>Időjárás helyszíne</b></MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">Jelenleg: @_label (@_lat.ToString("0.####"), @_lon.ToString("0.####"))</MudText>
+        <div class="d-flex gap-2 align-center">
+            <MudTextField @bind-Value="_search" Placeholder="Település keresése…" OnKeyDown="SearchKey" Immediate="true" Class="flex-grow-1 mt-0" />
+            <MudButton Variant="Variant.Outlined" OnClick="Search" Disabled="string.IsNullOrWhiteSpace(_search)">Keresés</MudButton>
+        </div>
+        @foreach (var p in _places)
+        {
+            <MudButton Variant="Variant.Text" FullWidth="true" Class="justify-start" OnClick="() => Pick(p)">@p.Display</MudButton>
+        }
+    </MudPaper>
+
+    <MudPaper Class="pa-3 mb-3" Elevation="1">
+        <MudText Typo="Typo.subtitle1"><b>Születésnapok</b></MudText>
+        <MudNumericField @bind-Value="_lookahead" Label="Előrejelzés (nap)" Min="1" Max="366" HelperText="Ennyi nappal előre jelenjen meg a „Közelgő” sávban." />
+    </MudPaper>
+
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="_busy" Class="mb-4">Mentés</MudButton>
+}
+
+@* A megjelenés eszközönként, azonnal mentődik (nem kell a Mentés gomb). *@
+<MudPaper Class="pa-3 mb-3" Elevation="1">
+    <MudText Typo="Typo.subtitle1"><b>Megjelenés</b></MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">Ezen az eszközön érvényes, azonnal életbe lép.</MudText>
+    <div class="theme-grid mt-2">
+        @foreach (var t in ThemeService.All)
+        {
+            var selected = Themes.Current.Id == t.Id;
+            <button type="button" class="@($"theme-card {(selected ? "selected" : "")}")" @onclick="() => Themes.SetThemeAsync(t.Id)" aria-pressed="@selected">
+                <span class="swatch">
+                    @foreach (var c in t.Swatch) { <span style="background:@c"></span> }
+                </span>
+                <span class="theme-name">@t.Name</span>
+                <span class="theme-desc">@t.Description</span>
+            </button>
+        }
+    </div>
+
+    <MudText Typo="Typo.body2" Class="mt-4 mb-1"><b>Háttéranimáció</b></MudText>
+    <MudRadioGroup T="BackgroundAnimation" Value="Themes.Animation" ValueChanged="v => Themes.SetAnimationAsync(v)">
+        @foreach (var (value, label) in MainLayout.AnimationOptions)
+        {
+            <MudRadio Value="value" Color="Color.Primary" Dense="true">@label</MudRadio>
+        }
+    </MudRadioGroup>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Ha a rendszerben be van kapcsolva a „mozgás csökkentése”, az animáció nem indul el.
+    </MudText>
+</MudPaper>
+
+@code {
+    protected override void OnInitialized() => Themes.Changed += OnThemeChanged;
+    private void OnThemeChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Themes.Changed -= OnThemeChanged;
+
+    private SettingsDto? _settings;
+    private string _label = "";
+    private double _lat;
+    private double _lon;
+    private int _lookahead;
+    private string? _search;
+    private IReadOnlyList<GeoPlace> _places = [];
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _settings = await Api.GetAsync<SettingsDto>("api/settings");
+            (_label, _lat, _lon, _lookahead) = (_settings.WeatherLabel, _settings.Latitude, _settings.Longitude, _settings.BirthdayLookaheadDays);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Search();
+    }
+
+    private async Task Search()
+    {
+        if (string.IsNullOrWhiteSpace(_search)) return;
+        try
+        {
+            _places = await Weather.SearchPlacesAsync(_search.Trim());
+            if (_places.Count == 0) Snackbar.Add("Nincs találat.", Severity.Info);
+        }
+        catch { Snackbar.Add("A keresés most nem érhető el.", Severity.Error); }
+    }
+
+    private void Pick(GeoPlace p)
+    {
+        (_label, _lat, _lon) = (p.Name, p.Latitude, p.Longitude);
+        _places = [];
+        _search = null;
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            _settings = await Api.PutAsync<SettingsDto>("api/settings", new SettingsDto(_label, _lat, _lon, _lookahead));
+            Snackbar.Add("Mentve.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}
