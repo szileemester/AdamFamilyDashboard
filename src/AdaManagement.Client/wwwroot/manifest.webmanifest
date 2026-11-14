@@ -1,6 +1,6 @@
 {
-  "name": "Ada – saját menedzser",
-  "short_name": "Ada",
+  "name": "Adam's family dashboard",
+  "short_name": "Adam's family",
   "id": "./",
   "start_url": "./",
   "display": "standalone",
@@ -19,6 +19,12 @@
       "src": "icon-192.png",
       "type": "image/png",
       "sizes": "192x192"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ]
 }

@@ -2,12 +2,15 @@
 
 Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böngészőből.
 
-- **Eisenhower mátrix**: kézi fontos/sürgős jelölés, opcionális határidő. Mobilon csoportosított lista, desktopon 2×2 rács drag & droppal.
+- **Eisenhower mátrix**: kézi fontos/sürgős jelölés, opcionális határidő. 2×2 panel kártyákkal: desktopon drag & drop,
+  telefonon tömör mini-kártyák, hosszú nyomásos húzással. A „Kész” visszavonható; a kész feladatok kereshetők.
 - **Ritka ismétlődő feladatok** (olajcsere, kazán): „N havonta”, fix ütemezés horgonydátumból. Esedékesség előtt
   `LeadDays` nappal (alapból 14) automatikusan bekerül a mátrixba. Teljesítési naplót vezet (dátum + megjegyzés).
   Generált feladat törlése = az alkalom kihagyása.
-- **Születésnapok**: kézi felvitel, CSV/vCard import, 30 napos előrejelzés. Feb 29 → nem szökőévben Feb 28.
-- **Időjárás**: Open-Meteo (kulcs nélkül), ma + 2 nap, egy beállítható helyszín.
+- **Születésnapok**: kézi felvitel, állítható előrejelzés (alapból 30 nap). Feb 29 → nem szökőévben Feb 28.
+- **Időjárás**: Open-Meteo (kulcs nélkül), egy beállítható helyszín. A kezdőképen ma + 2 nap; kattintásra heti
+  előrejelzés, naponként lenyíló órás bontással.
+- **Témák**: Piros és Kék (mozgó háttér), Sötét és Világos (statikus). Eszközönként tárolódik.
 
 ## Felépítés
 
@@ -15,8 +18,8 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 |---|---|
 | `src/AdaManagement.Server` | ASP.NET Core minimal API, EF Core (SQL Server), BFF Google login. Ez szolgálja ki a WASM klienst is. |
 | `src/AdaManagement.Client` | Blazor WebAssembly PWA, MudBlazor |
-| `src/AdaManagement.Shared` | DTO-k |
-| `tests/AdaManagement.Tests` | xUnit tesztek a doménlogikára (ismétlődés, generálás, születésnap, import) |
+| `src/AdaManagement.Shared` | DTO-k, közös születésnap-számolás |
+| `tests/AdaManagement.Tests` | xUnit: doménlogika (ismétlődés, generálás, születésnap), és végpont-tesztek valódi SQL Serveren (Testcontainers, Docker kell hozzá) |
 | `infra/main.bicep` | Azure: App Service F1 + Azure SQL free offer + 1 €-s budget riasztás |
 | `.github/workflows/deploy.yml` | teszt → publish → EF migration bundle → deploy |
 
@@ -27,7 +30,8 @@ Fontosabb döntések:
 - **Nincs keep-alive ping:** a DB ébrentartása elégetné az SQL free offer havi keretét.
 - **Auth:** a szerver intézi a Google logint, a böngésző csak HttpOnly cookie-t kap (180 nap, csúszó lejárat).
   Csak az `Auth:AllowedEmails` címei léphetnek be. A cookie-kulcsok a DB-ben vannak, így az újraindulás nem léptet ki.
-  CSRF ellen: SameSite=Lax cookie, és minden nem-GET `/api` hívásnak `X-Ada-Client` fejlécet kell küldenie.
+  CSRF ellen: SameSite=Lax cookie, és minden nem-GET `/api` hívásnak `X-Ada-Client` fejlécet kell küldenie;
+  a kijelentkezés csak saját oldalról (Origin-ellenőrzés). Az app nem ágyazható be idegen oldalba (`frame-ancestors 'none'`).
 - **Időzóna:** a „ma” mindig Europe/Budapest szerint számolódik.
 
 ## Helyi futtatás

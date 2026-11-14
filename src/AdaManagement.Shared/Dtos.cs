@@ -10,9 +10,11 @@ public record TaskDto(
     DateTime CreatedAt,
     DateTime? CompletedAt,
     int? RecurringTemplateId,
-    DateOnly? OccurrenceDate);
+    DateOnly? OccurrenceDate,
+    string? Icon);
 
-public record TaskEditDto(string Title, string? Notes, bool IsImportant, bool IsUrgent, DateOnly? DueDate);
+/// <param name="Icon">Kézzel választott ikon kulcsa (null = automatikus a cím alapján).</param>
+public record TaskEditDto(string Title, string? Notes, bool IsImportant, bool IsUrgent, DateOnly? DueDate, string? Icon);
 
 public record TemplateDto(
     int Id,
@@ -49,7 +51,3 @@ public record DashboardDto(
     SettingsDto Settings);
 
 public record MeDto(string Email, string? Name);
-
-public record ImportRequestDto(string Content);
-
-public record ImportResultDto(int Imported, int Skipped);

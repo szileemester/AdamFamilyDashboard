@@ -179,29 +179,3 @@ public class BirthdayTests
         Assert.Single(BirthdayCalculator.Upcoming([b], today, 31));
     }
 }
-
-public class ImportParserTests
-{
-    [Fact]
-    public void Csv_tobbfele_datumformatum()
-    {
-        var (items, skipped) = BirthdayImportParser.Parse("Név;Dátum\nAnna;1990-01-05\nBéla;03.15\nCsaba,--12-24\nRossz;13-40\n");
-        Assert.Equal(2, skipped); // fejléc + hibás
-        Assert.Collection(items,
-            a => Assert.Equal(new BirthdayImportParser.ParsedBirthday("Anna", 1, 5, 1990), a),
-            b => Assert.Equal(new BirthdayImportParser.ParsedBirthday("Béla", 3, 15, null), b),
-            c => Assert.Equal(new BirthdayImportParser.ParsedBirthday("Csaba", 12, 24, null), c));
-    }
-
-    [Fact]
-    public void VCard_FN_es_BDAY()
-    {
-        const string vcf = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Kiss Anna\r\nBDAY:1985-02-29\r\nEND:VCARD\r\n" +
-                           "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Nagy Béla\r\nBDAY;VALUE=date:--0704\r\nEND:VCARD\r\n" +
-                           "BEGIN:VCARD\r\nFN:Születésnap nélkül\r\nEND:VCARD\r\n";
-        var (items, skipped) = BirthdayImportParser.Parse(vcf);
-        Assert.Equal(1, skipped);
-        Assert.Equal(new BirthdayImportParser.ParsedBirthday("Kiss Anna", 2, 29, 1985), items[0]);
-        Assert.Equal(new BirthdayImportParser.ParsedBirthday("Nagy Béla", 7, 4, null), items[1]);
-    }
-}

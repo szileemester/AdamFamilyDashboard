@@ -3,77 +3,140 @@
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
 
-<PageTitle>Születésnapok – Ada</PageTitle>
-<div class="d-flex align-center mb-2 gap-2">
-    <MudText Typo="Typo.h5">Születésnapok</MudText>
-    <MudSpacer />
-    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Upload" OnClick="() => _showImport = !_showImport">Import</MudButton>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add">Új</MudButton>
-</div>
+<PageTitle>Születésnapok – Adam's family dashboard</PageTitle>
 
-@if (_showImport)
-{
-    <MudPaper Class="pa-3 mb-3" Outlined="true">
-        <MudText Typo="Typo.body2">
-            CSV (soronként <code>Név;Dátum</code>, a dátum lehet <code>1990-01-05</code>, <code>01-05</code> vagy <code>01.05</code>) vagy vCard (.vcf) fájl.
-            A már meglévő név + dátum párosokat kihagyja.
-        </MudText>
-        <InputFile OnChange="Import" accept=".csv,.txt,.vcf" class="mt-2" />
-    </MudPaper>
-}
+@* kezdőkép + „Hamarosan” kiemelt kártyák + a többi hónapok szerint, kisebb kártyákon. *@
+<section class="hero sub-hero">
+    <div class="hero-content">
+        <div class="hero-kicker">Család és barátok</div>
+        <div class="hero-head">
+            <div class="sub-hero-name">
+                <BackButton />
+                <h1 class="hero-title">Születésnapok</h1>
+            </div>
+            <div class="hero-actions">
+                <button type="button" class="hero-btn primary" @onclick="Add"><MudIcon Icon="@Icons.Material.Filled.Add" /> Új</button>
+            </div>
+        </div>
+        @if (_items is { Count: > 0 })
+        {
+            var all = Sorted.ToList();
+            var next = all[0];
+            <div class="hero-meta">
+                <span class="hero-stat"><b>@all.Count</b> születésnap</span>
+                <span class="hero-stat"><b>@all.Count(b => b.Days <= Lookahead)</b> @Lookahead napon belül</span>
+                <span class="hero-next">Következő: <b>@next.Item.Name</b> · @Format.Relative(next.Days)</span>
+            </div>
+        }
+    </div>
+</section>
 
 @if (_items is null)
 {
-    <MudProgressLinear Indeterminate="true" />
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
 else if (_items.Count == 0)
 {
-    <MudText Typo="Typo.body2">Még nincs születésnap felvéve.</MudText>
+    <div class="sub-empty">Még nincs születésnap felvéve. Az „Új” gombbal veheted fel az elsőt.</div>
 }
 else
 {
-    <MudPaper Elevation="1" Class="pa-2">
-        @foreach (var b in Sorted)
-        {
-            <div class="task-row" style="cursor:pointer" @onclick="() => Edit(b.Item)">
-                <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Small" Class="mx-2" Color="@(b.Days == 0 ? Color.Secondary : Color.Default)" />
-                <div class="task-title">
-                    <MudText Typo="Typo.body2">@b.Item.Name @(b.Age is { } a ? $"({a})" : "")</MudText>
-                    <MudText Typo="Typo.caption">
-                        @BirthdayEditDialog.MonthName(b.Item.Month) @(b.Item.Day). · @Format.Relative(b.Days)@(b.Item.Notes is null ? "" : $" · {b.Item.Notes}")
-                    </MudText>
-                </div>
-            </div>
-        }
-    </MudPaper>
+    var all = Sorted.ToList();
+    var soon = all.Where(b => b.Days <= Lookahead).ToList();
+    var later = all.Where(b => b.Days > Lookahead).ToList();
+
+    @if (soon.Count > 0)
+    {
+        <h2 class="sub-section">Hamarosan <span class="m-count">@soon.Count</span></h2>
+        <div class="bd-feature-grid">
+            @foreach (var b in soon)
+            {
+                <article class="@($"bd-feature {(b.Days == 0 ? "today" : b.Days <= 7 ? "week" : "")}")" style="@($"--hue:{b.Item.Id * 47 % 360}")"
+                         role="button" tabindex="0" aria-label="@($"{b.Item.Name} szerkesztése")"
+                         @onclick="() => Edit(b.Item)">
+                    <div class="bd-feature-art" aria-hidden="true"></div>
+                    @if (b.Days == 0) { <span class="bd-feature-emoji" aria-hidden="true">🎉</span> }
+                    <div class="bd-avatar">@Initials(b.Item.Name)</div>
+                    <div class="bd-feature-body">
+                        <div class="bd-name">@b.Item.Name</div>
+                        <div class="bd-sub">@DateText(b.Item, b.Next)@(b.Age is { } a ? $" · {a} éves lesz" : "")</div>
+                        @if (b.Item.Notes is { } n) { <div class="bd-notes">@n</div> }
+                    </div>
+                    <div class="bd-count">
+                        @if (b.Days == 0)
+                        {
+                            <b>Ma!</b>
+                        }
+                        else if (b.Days == 1)
+                        {
+                            <b>Holnap</b>
+                        }
+                        else
+                        {
+                            <b>@b.Days</b><span>nap múlva</span>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    }
+
+    @foreach (var month in later.GroupBy(b => (b.Next.Year, b.Next.Month)))
+    {
+        <h2 class="sub-section">@Capital(BirthdayEditDialog.MonthName(month.Key.Month)) <span class="m-count">@month.Count()</span></h2>
+        <div class="bd-grid">
+            @foreach (var b in month)
+            {
+                <article class="bd-card" style="@($"--hue:{b.Item.Id * 47 % 360}")"
+                         role="button" tabindex="0" aria-label="@($"{b.Item.Name} szerkesztése")"
+                         @onclick="() => Edit(b.Item)">
+                    <div class="bd-avatar">@Initials(b.Item.Name)</div>
+                    <div class="bd-card-body">
+                        <div class="bd-name">@b.Item.Name</div>
+                        <div class="bd-sub">@DateText(b.Item, b.Next)@(b.Age is { } a ? $" · {a} éves lesz" : "")</div>
+                    </div>
+                    <div class="bd-days">@b.Days<span>nap</span></div>
+                </article>
+            }
+        </div>
+    }
 }
 
 @code {
     private List<BirthdayDto>? _items;
-    private bool _showImport;
+    private int Lookahead { get; set; } = 30;
 
-    // A következő előfordulás szerinti sorrend (Feb 29 → nem szökőévben Feb 28), kliensoldalon számolva.
-    private IEnumerable<(BirthdayDto Item, int Days, int? Age)> Sorted
+    // A következő előfordulás szerinti sorrend (Feb 29 → nem szökőévben Feb 28), ugyanazzal a számolással, mint a szerver.
+    private IEnumerable<(BirthdayDto Item, int Days, int? Age, DateOnly Next)> Sorted
     {
         get
         {
-            var today = DateOnly.FromDateTime(DateTime.Today);
+            var today = Format.Today;
             return _items!.Select(b =>
             {
-                var next = Next(b.Month, b.Day, today);
-                return (b, next.DayNumber - today.DayNumber, b.Year is { } y ? next.Year - y : (int?)null);
+                var next = BirthdayDates.NextOccurrence(b.Month, b.Day, today);
+                return (b, next.DayNumber - today.DayNumber, BirthdayDates.TurningAge(b.Year, next), next);
             }).OrderBy(x => x.Item2).ThenBy(x => x.b.Name);
         }
     }
 
-    private static DateOnly Next(int month, int day, DateOnly today)
+    /// <summary>„Kovács Anna” → „KA”; egyszavas névnél az első betű.</summary>
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpper(p[0])));
+
+    private static string Capital(string s) => s.Length == 0 ? s : char.ToUpper(s[0]) + s[1..];
+
+    /// <summary>Hónap, nap és a hét napja (pl. „március 3., kedd”).</summary>
+    private static string DateText(BirthdayDto b, DateOnly next) =>
+        $"{BirthdayEditDialog.MonthName(b.Month)} {b.Day}., {next.ToString("dddd")}";
+
+    protected override async Task OnInitializedAsync()
     {
-        DateOnly In(int year) => month == 2 && day == 29 && !DateTime.IsLeapYear(year) ? new(year, 2, 28) : new(year, month, day);
-        var d = In(today.Year);
-        return d >= today ? d : In(today.Year + 1);
+        await Load();
+        // A „Hamarosan” határa a beállításokban megadott előrejelzés (a főoldal „Közelgő” sávjával egyezik).
+        try { Lookahead = (await Api.GetAsync<SettingsDto>("api/settings")).BirthdayLookaheadDays; } catch { }
     }
 
-    protected override Task OnInitializedAsync() => Load();
 
     private async Task Load()
     {
@@ -89,19 +152,5 @@ else
     private async Task Edit(BirthdayDto b)
     {
         if (await BirthdayEditDialog.ShowAsync(Dialogs, b)) await Load();
-    }
-
-    private async Task Import(InputFileChangeEventArgs e)
-    {
-        try
-        {
-            using var reader = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 1_000_000));
-            var content = await reader.ReadToEndAsync();
-            var result = await Api.PostAsync<ImportResultDto>("api/birthdays/import", new ImportRequestDto(content));
-            Snackbar.Add($"Importálva: {result.Imported}, kihagyva: {result.Skipped}", Severity.Success);
-            _showImport = false;
-            await Load();
-        }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 }

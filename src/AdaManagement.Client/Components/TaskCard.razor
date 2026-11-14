@@ -1,0 +1,51 @@
+@* Mozi téma: egy feladat „plakát” kártyaként. Hoverre kiemelkedik, megdől az egér felé, és előjönnek a gombok.
+   Érintőképernyőn a gombok mindig látszanak (CSS: hover: none). Jelölést a szerkesztő ablakban vagy húzással lehet váltani. *@
+
+@{
+    var q = Quadrants.Of(Task.IsImportant, Task.IsUrgent);
+    int? days = Task.DueDate is { } due ? due.DayNumber - Today.DayNumber : null;
+}
+
+@* A kártya maga nem gomb (benne van a „Kész” gomb, egymásba ágyazott gomb nem lehet): a megnyitás egy átlátszó,
+   az egész kártyát lefedő gomb (.m-open), a gombsor fölötte van. Így billentyűzettel külön fókuszálható mindkettő. *@
+<div class="@($"m-card m-card-{q.Id}")" style="--hue:@Hue" data-task-id="@Task.Id">
+    <button type="button" class="m-open" aria-label="@($"{Task.Title} – megnyitás")" disabled="@ReadOnly" @onclick="Open"></button>
+    <div class="m-card-art" aria-hidden="true">
+        @* Háttérikon: kézzel választott, vagy a címből kitalált, vagy a negyed ikonja (TaskIcons). *@
+        <MudIcon Icon="@TaskIcons.For(Task, q)" Class="m-card-icon" />
+    </div>
+
+    @if (Task.RecurringTemplateId is not null)
+    {
+        <div class="m-badges"><span class="m-badge">Ismétlődő</span></div>
+    }
+
+    <div class="m-card-body">
+        @* „feladat – esedékesség”: a határidő a cím mögött, lejártnál pirossal. *@
+        <div class="m-card-title">
+            @Task.Title@if (days is { } d)
+            {
+                <span class="@($"m-due {(d < 0 ? "overdue" : d == 0 ? "today" : "")}")"> – @Format.Relative(d)</span>
+            }
+        </div>
+        <div class="m-card-actions">
+            <button type="button" class="m-btn wide primary" title="Kész" disabled="@ReadOnly" @onclick="() => OnComplete.InvokeAsync(Task)">
+                <MudIcon Icon="@Icons.Material.Filled.Check" /><span>Kész</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TaskDto Task { get; set; } = default!;
+    [Parameter] public DateOnly Today { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback<TaskDto> OnComplete { get; set; }
+    [Parameter] public EventCallback<TaskDto> OnEdit { get; set; }
+
+    /// <summary>Minden kártya kap egy saját árnyalatot, így a sor „plakátjai” különböznek egymástól.</summary>
+    private int Hue => Task.Id * 47 % 360;
+
+    // A „Task” név itt a paraméter, ezért a típust teljes névvel kell írni.
+    private System.Threading.Tasks.Task Open() => ReadOnly ? System.Threading.Tasks.Task.CompletedTask : OnEdit.InvokeAsync(Task);
+}

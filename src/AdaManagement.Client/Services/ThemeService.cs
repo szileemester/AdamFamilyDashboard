@@ -2,56 +2,60 @@ using MudBlazor;
 
 namespace AdaManagement.Client.Services;
 
-public enum AppTheme { Csendes, Bento, Meleg, Vilagos }
-
-public enum BackgroundAnimation { Ki, Hangulat, Idojaras }
-
-/// <summary>Hogyan jelenjen meg a mátrix telefonon (desktopon mindig 2×2 rács).</summary>
-public enum MatrixLayout { Lista, Bento, Fulek }
-
-public record ThemeInfo(AppTheme Id, string Name, string Description, bool IsDark, MatrixLayout Layout, MudTheme MudTheme, string[] Swatch);
-
 /// <summary>
-/// Témaválasztás és háttéranimáció. Eszközönként a localStorage-ban tárolódik (telefonon és gépen lehet más).
+/// A négy téma ugyanazt a (filmes) elrendezést használja, csak a színek és a mozgás térnek el:
+/// a Piros és a Kék dinamikus (mozgó háttér, fénycsík), a Sötét és a Világos statikus.
 /// </summary>
+public enum AppTheme { Piros, Kek, Sotet, Vilagos }
+
+public record ThemeInfo(AppTheme Id, string Name, string Description, bool IsDark, bool IsDynamic, MudTheme MudTheme)
+{
+    /// <summary>CSS- és JS-kulcs (pl. „kek”).</summary>
+    public string Key => Id.ToString().ToLowerInvariant();
+}
+
+/// <summary>Témaválasztás. Eszközönként a localStorage-ban tárolódik (telefonon és gépen lehet más).</summary>
 public class ThemeService(LocalCache cache)
 {
     private const string ThemeKey = "ada.theme";
-    private const string AnimationKey = "ada.animation";
 
     public static readonly IReadOnlyList<ThemeInfo> All =
     [
-        new(AppTheme.Csendes, "Csendes", "Szinte fekete, letisztult lista", true, MatrixLayout.Lista, Dark(
-                background: "#0c0c0f", surface: "rgba(31,31,38,.92)", bar: "rgba(12,12,15,.9)", drawer: "#15151a",
-                primary: "#B8B2F2", text: "#f3f3f5", secondary: "#a8a8b2", lines: "#383841"),
-            ["#0c0c0f", "#B8B2F2", "#F09595", "#FAC775"]),
-        new(AppTheme.Bento, "Bento", "Színes csempék, gyors áttekintés", true, MatrixLayout.Bento, Dark(
-                background: "#0f1115", surface: "rgba(36,41,52,.92)", bar: "rgba(15,17,21,.9)", drawer: "#181b22",
-                primary: "#958EEA", text: "#f2f4f8", secondary: "#a7adbc", lines: "#3c4250"),
-            ["#0f1115", "#958EEA", "#382024", "#382e18"]),
-        new(AppTheme.Meleg, "Meleg", "Barnás tónus, fülek, alsó menü", true, MatrixLayout.Fulek, Dark(
-                background: "#141110", surface: "rgba(46,40,36,.92)", bar: "rgba(20,17,16,.9)", drawer: "#1e1a18",
-                primary: "#F5A285", text: "#f7f1ea", secondary: "#bcb2a8", lines: "#4a413b"),
-            ["#141110", "#F5A285", "#4a2e26", "#f7f1ea"]),
-        new(AppTheme.Vilagos, "Világos", "Az eredeti, világos megjelenés", false, MatrixLayout.Lista, new MudTheme
+        new(AppTheme.Piros, "Piros", "Mozgó, piros–lila fények", true, true, Dark(
+                background: "#0a0a0b", surface: "rgba(22,22,25,.96)", drawer: "#111113",
+                primary: "#F0464F", text: "#ffffff", secondary: "#b9b9c0", lines: "#2f2f35")),
+        new(AppTheme.Kek, "Kék", "Mozgó, kék–türkiz fények", true, true, Dark(
+                background: "#080b11", surface: "rgba(19,24,33,.96)", drawer: "#0e131b",
+                primary: "#3D8BFF", text: "#ffffff", secondary: "#b3bccb", lines: "#2b3341")),
+        new(AppTheme.Sotet, "Sötét", "Nyugodt grafit, mozgás nélkül", true, false, Dark(
+                background: "#111113", surface: "rgba(28,28,32,.98)", drawer: "#161619",
+                primary: "#EDEDF0", text: "#f3f3f5", secondary: "#a9a9b2", lines: "#34343b")),
+        new(AppTheme.Vilagos, "Világos", "Világos háttér, mozgás nélkül", false, false, new MudTheme
             {
                 PaletteLight = new PaletteLight
                 {
-                    Primary = "#303f9f",
-                    AppbarBackground = "#303f9f",
-                    Background = "#eceef3",               // a fehér kártyák jobban elválnak a háttértől
-                    Surface = "rgba(255,255,255,.96)",
-                    TextPrimary = "rgba(0,0,0,.92)",
-                    TextSecondary = "rgba(0,0,0,.66)",
-                    LinesDefault = "rgba(0,0,0,.16)",
-                    Divider = "rgba(0,0,0,.16)",
+                    Primary = "#1c1c21",
+                    Secondary = "#C2185B",
+                    Background = "#f2f2f5",
+                    Surface = "rgba(255,255,255,.98)",
+                    AppbarBackground = "rgba(0,0,0,0)",
+                    AppbarText = "#1c1c21",
+                    DrawerBackground = "#fafafb",
+                    DrawerText = "#1c1c21",
+                    DrawerIcon = "rgba(0,0,0,.6)",
+                    TextPrimary = "rgba(0,0,0,.9)",
+                    TextSecondary = "rgba(0,0,0,.6)",
+                    ActionDefault = "rgba(0,0,0,.6)",
+                    LinesDefault = "rgba(0,0,0,.12)",
+                    LinesInputs = "rgba(0,0,0,.25)",
+                    Divider = "rgba(0,0,0,.12)",
+                    Error = "#D32F2F",
+                    Success = "#1E8E5A",
                 },
-            },
-            ["#ffffff", "#3949ab", "#e53935", "#fb8c00"]),
+            }),
     ];
 
     public ThemeInfo Current { get; private set; } = All[0];
-    public BackgroundAnimation Animation { get; private set; } = BackgroundAnimation.Hangulat;
     public event Action? Changed;
 
     public async Task LoadAsync()
@@ -59,41 +63,40 @@ public class ThemeService(LocalCache cache)
         var stored = await cache.GetAsync<string>(ThemeKey);
         Current = stored switch
         {
-            "light" => All.First(t => t.Id == AppTheme.Vilagos), // a korábbi világos/sötét kapcsoló értéke
-            _ when Enum.TryParse<AppTheme>(stored, out var id) => All.First(t => t.Id == id),
+            // korábbi témanevek
+            "Mozi" => Get(AppTheme.Piros),
+            "light" => Get(AppTheme.Vilagos),
+            "Csendes" or "Bento" or "Meleg" => Get(AppTheme.Sotet),
+            _ when Enum.TryParse<AppTheme>(stored, out var id) && Enum.IsDefined(id) => Get(id),
             _ => All[0],
         };
-        if (Enum.TryParse<BackgroundAnimation>(await cache.GetAsync<string>(AnimationKey), out var anim))
-            Animation = anim;
         Changed?.Invoke();
     }
 
     public async Task SetThemeAsync(AppTheme id)
     {
-        Current = All.First(t => t.Id == id);
+        Current = Get(id);
         await cache.SetAsync(ThemeKey, id.ToString());
         Changed?.Invoke();
     }
 
-    public async Task SetAnimationAsync(BackgroundAnimation animation)
-    {
-        Animation = animation;
-        await cache.SetAsync(AnimationKey, animation.ToString());
-        Changed?.Invoke();
-    }
+    /// <summary>Az app gyökerének osztályai: közös „theme-mozi” elrendezés + a téma saját színei és mozgása.</summary>
+    public string CssClass =>
+        $"theme-mozi theme-{Current.Key} {(Current.IsDynamic ? "is-dynamic" : "is-static")}{(Current.IsDark ? "" : " is-light")}";
 
-    public string CssClass => $"theme-{Current.Id.ToString().ToLowerInvariant()}";
+    private static ThemeInfo Get(AppTheme id) => All.First(t => t.Id == id);
 
-    private static MudTheme Dark(string background, string surface, string bar, string drawer, string primary,
+    private static MudTheme Dark(string background, string surface, string drawer, string primary,
         string text, string secondary, string lines) => new()
     {
         PaletteDark = new PaletteDark
         {
             Primary = primary,
+            PrimaryContrastText = primary == "#EDEDF0" ? "#111113" : "#ffffff",
             Secondary = "#ED93B1",
             Background = background,
             Surface = surface,
-            AppbarBackground = bar,
+            AppbarBackground = "rgba(0,0,0,0)",
             AppbarText = text,
             DrawerBackground = drawer,
             DrawerText = text,

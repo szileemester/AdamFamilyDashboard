@@ -1,66 +1,52 @@
-@* „Közelgő” sáv: születésnapok (előrejelzési ablakon belül) és esedékes karbantartások.
-   Meleg témában chipek, Bento-ban csempe, Csendesben kártya nélküli lista, Világosban kártya. *@
-
-@if (Theme == AppTheme.Meleg)
-{
-    <div class="mb-1">
-        @if (Birthdays.Count == 0 && Maintenance.Count == 0)
+@* „Hamarosan” lista a kezdőkép jobb oldalán (telefonon alatta, vízszintesen görgetve): születésnapok (előrejelzési
+   ablakon belül) és esedékes karbantartások. A két legközelebbi látszik, a többi egy „… és még X más” panelbe sűrítve,
+   hogy a kezdőkép ne nőjön meg. *@
+@{
+    var all = Items();
+    var shown = all.Count <= Max ? all : all.Take(Max - 1).ToList();
+    var rest = all.Skip(shown.Count).ToList();
+}
+<aside class="hero-side">
+    <div class="hero-side-title">Hamarosan</div>
+    <div class="up-list">
+        @if (all.Count == 0)
         {
-            <span class="up-chip mud-text-secondary">Nincs semmi a láthatáron</span>
+            <span class="up-none">Nincs semmi a láthatáron</span>
         }
-        @foreach (var m in Maintenance)
+        @foreach (var i in shown)
         {
-            <span class="@($"up-chip {(m.DaysUntil < 0 ? "overdue" : "")}")">🔧 @m.Title · @Format.Relative(m.DaysUntil)</span>
+            <a class="up-item" href="@i.Href">
+                <span class="up-emoji">@i.Emoji</span>
+                <span class="up-name">@i.Name</span>
+                <span class="@($"up-when {i.WhenClass}")">@Format.Relative(i.Days)</span>
+            </a>
         }
-        @foreach (var b in Birthdays)
+        @if (rest.Count > 0)
         {
-            <span class="up-chip">🎂 @b.Name@(b.TurningAge is { } a ? $" ({a})" : "") · @Format.Relative(b.DaysUntil)</span>
+            <a class="up-item up-more" href="@(rest.Any(i => i.Emoji == "🎂") ? "szuletesnapok" : "ismetlodo")"
+               title="@string.Join(", ", rest.Select(i => i.Name))">
+                <span class="up-emoji">…</span>
+                <span class="up-name">és még @rest.Count más</span>
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="up-when" />
+            </a>
         }
     </div>
-    return;
-}
-
-<div class="@WrapperClass" style="height:100%">
-    <MudText Typo="@(Theme == AppTheme.Vilagos ? Typo.subtitle1 : Typo.caption)" Class="@(Theme == AppTheme.Vilagos ? "d-block" : "d-block mud-text-secondary")">
-        @if (Theme == AppTheme.Vilagos) { <b>Közelgő</b> } else { <span>Közelgő</span> }
-    </MudText>
-
-    @if (Birthdays.Count == 0 && Maintenance.Count == 0)
-    {
-        <MudText Typo="Typo.caption">Nincs semmi a láthatáron.</MudText>
-    }
-
-    @foreach (var m in Maintenance)
-    {
-        <div class="d-flex align-center gap-2 py-1">
-            <MudIcon Icon="@Icons.Material.Filled.Build" Size="Size.Small" Color="@(m.DaysUntil < 0 ? Color.Error : Color.Primary)" />
-            <MudText Typo="Typo.body2" Class="flex-grow-1">@m.Title</MudText>
-            <MudText Typo="Typo.caption" Class="@(m.DaysUntil < 0 ? "overdue" : "")">@Format.Relative(m.DaysUntil)</MudText>
-        </div>
-    }
-
-    @foreach (var b in Birthdays)
-    {
-        <div class="d-flex align-center gap-2 py-1">
-            <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Small" Color="@(b.DaysUntil == 0 ? Color.Secondary : Color.Default)" />
-            <MudText Typo="Typo.body2" Class="flex-grow-1">
-                @if (b.DaysUntil == 0) { <b>@b.Name</b> } else { @b.Name }
-                @if (b.TurningAge is { } age) { <span class="mud-text-secondary"> (@age)</span> }
-            </MudText>
-            <MudText Typo="Typo.caption">@b.Date.ToString("MMM d.") · @Format.Relative(b.DaysUntil)</MudText>
-        </div>
-    }
-</div>
+</aside>
 
 @code {
     [Parameter] public IReadOnlyList<UpcomingBirthdayDto> Birthdays { get; set; } = [];
     [Parameter] public IReadOnlyList<UpcomingMaintenanceDto> Maintenance { get; set; } = [];
-    [Parameter] public AppTheme Theme { get; set; }
 
-    private string WrapperClass => Theme switch
-    {
-        AppTheme.Bento => "tile tile-up",
-        AppTheme.Csendes => "up-plain",
-        _ => "mud-paper mud-elevation-1 pa-3",
-    };
+    /// <summary>Legfeljebb ennyi sor (ha több van, az utolsó helyén „… és még X más” áll).</summary>
+    private const int Max = 3;
+
+    private sealed record UpItem(string Emoji, string Name, int Days, string Href, string WhenClass);
+
+    /// <summary>Karbantartások és születésnapok együtt, esedékesség szerint.</summary>
+    private List<UpItem> Items() =>
+        Maintenance.Select(m => new UpItem("🔧", m.Title, m.DaysUntil, "ismetlodo", m.DaysUntil < 0 ? "overdue" : ""))
+            .Concat(Birthdays.Select(b => new UpItem("🎂", b.TurningAge is { } a ? $"{b.Name} ({a})" : b.Name, b.DaysUntil,
+                "szuletesnapok", b.DaysUntil == 0 ? "today" : "")))
+            .OrderBy(i => i.Days).ThenBy(i => i.Name)
+            .ToList();
 }

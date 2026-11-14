@@ -1,12 +1,23 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using AdaManagement.Client.Components;
 
 namespace AdaManagement.Client.Services;
 
-public record WeatherDay(DateOnly Date, int Code, double Max, double Min, double PrecipitationMm, int? PrecipitationProbability);
+public record WeatherDay(DateOnly Date, int Code, double Max, double Min, double PrecipitationMm, int? PrecipitationProbability,
+    double? WindMaxKmh = null);
 
-public record WeatherForecast(string Label, double Latitude, double Longitude, DateTime FetchedAtUtc, IReadOnlyList<WeatherDay> Days);
+/// <summary>Egy óra (helyi, budapesti idő szerint).</summary>
+public record WeatherHour(DateTime Time, int Code, double Temp, int? PrecipitationProbability, double PrecipitationMm, double? WindKmh, bool IsDay);
+
+public record WeatherForecast(string Label, double Latitude, double Longitude, DateTime FetchedAtUtc, IReadOnlyList<WeatherDay> Days,
+    IReadOnlyList<WeatherHour>? Hours = null)
+{
+    /// <summary>Az adott nap órái (a mai napnál csak a mostani órától).</summary>
+    public IEnumerable<WeatherHour> HoursOf(DateOnly date, DateTime nowLocal) =>
+        (Hours ?? []).Where(h => DateOnly.FromDateTime(h.Time) == date && h.Time > nowLocal.AddHours(-1));
+}
 
 public record GeoPlace(string Name, string? Admin, string? Country, double Latitude, double Longitude)
 {
@@ -22,34 +33,55 @@ public class WeatherService(HttpClient external, LocalCache cache)
     private const string CacheKey = "ada.weather";
     private static readonly TimeSpan MaxAge = TimeSpan.FromMinutes(30);
 
-    /// <summary>Friss előrejelzés érkezett (pl. a háttéranimáció ehhez igazodik).</summary>
-    public event Action<WeatherForecast>? Updated;
+    /// <summary>Ennyi napot kér le (a kártyák ebből 3-at mutatnak, a heti ablak mindet).</summary>
+    public const int ForecastDays = 7;
 
-    public Task<WeatherForecast?> GetCachedAsync() => cache.GetAsync<WeatherForecast>(CacheKey);
+    /// <summary>
+    /// A tárolt előrejelzés azonnali megjelenítéshez – csak ha ugyanehhez a helyhez szól, és a már elmúlt napok nélkül
+    /// (különben egy pár napos cache „mai” napja valójában egy korábbi nap lenne).
+    /// </summary>
+    public async Task<WeatherForecast?> GetCachedAsync(double lat, double lon)
+    {
+        var cached = await cache.GetAsync<WeatherForecast>(CacheKey);
+        return cached is null || cached.Latitude != lat || cached.Longitude != lon ? null : FromToday(cached);
+    }
+
+    private static WeatherForecast? FromToday(WeatherForecast f)
+    {
+        var today = Format.Today;
+        var days = f.Days.Where(d => d.Date >= today).ToList();
+        return days.Count == 0 ? null : f with { Days = days };
+    }
 
     public async Task<WeatherForecast> GetAsync(string label, double lat, double lon, bool force = false)
     {
-        var cached = await GetCachedAsync();
-        if (!force && cached is not null && cached.Latitude == lat && cached.Longitude == lon &&
+        var cached = await GetCachedAsync(lat, lon);
+        if (!force && cached is not null && cached.Days[0].Date == Format.Today && cached.Hours is { Count: > 0 } &&
             DateTime.UtcNow - cached.FetchedAtUtc < MaxAge)
             return cached;
 
         var inv = CultureInfo.InvariantCulture;
         var url = $"https://api.open-meteo.com/v1/forecast?latitude={lat.ToString(inv)}&longitude={lon.ToString(inv)}" +
-                  "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max" +
-                  "&timezone=Europe%2FBudapest&forecast_days=3";
+                  "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max" +
+                  "&hourly=temperature_2m,weather_code,precipitation_probability,precipitation,wind_speed_10m,is_day" +
+                  $"&timezone=Europe%2FBudapest&forecast_days={ForecastDays}";
         var resp = await external.GetFromJsonAsync<ForecastResponse>(url)
                    ?? throw new InvalidOperationException("Üres válasz az Open-Meteótól.");
 
         var d = resp.Daily;
         var days = d.Time.Select((t, i) => new WeatherDay(
-            DateOnly.Parse(t, inv), d.WeatherCode[i] ?? 0, d.Max[i] ?? 0, d.Min[i] ?? 0, d.Precipitation[i] ?? 0, d.PrecipitationProbability?[i]))
+            DateOnly.Parse(t, inv), d.WeatherCode[i] ?? 0, d.Max[i] ?? 0, d.Min[i] ?? 0, d.Precipitation[i] ?? 0, d.PrecipitationProbability?[i], d.WindMax?[i]))
             .ToList();
 
-        var forecast = new WeatherForecast(label, lat, lon, DateTime.UtcNow, days);
+        var h = resp.Hourly;
+        List<WeatherHour> hours = h is null ? [] : h.Time.Select((t, i) => new WeatherHour(
+            DateTime.Parse(t, inv), h.WeatherCode[i] ?? 0, h.Temp[i] ?? 0, h.PrecipitationProbability?[i],
+            h.Precipitation?[i] ?? 0, h.Wind?[i], (h.IsDay?[i] ?? 1) == 1))
+            .ToList();
+
+        var forecast = new WeatherForecast(label, lat, lon, DateTime.UtcNow, days, hours);
         await cache.SetAsync(CacheKey, forecast);
-        Updated?.Invoke(forecast);
-        return forecast;
+        return FromToday(forecast) ?? forecast;
     }
 
     public async Task<IReadOnlyList<GeoPlace>> SearchPlacesAsync(string name)
@@ -85,7 +117,22 @@ public class WeatherService(HttpClient external, LocalCache cache)
         _ => ("🌡️", "Ismeretlen"),
     };
 
-    private sealed record ForecastResponse([property: JsonPropertyName("daily")] Daily Daily);
+    /// <summary>Éjjel a derült/többnyire derült ikon hold.</summary>
+    public static (string Icon, string Text) Describe(int code, bool isDay) =>
+        !isDay && code is 0 or 1 ? ("🌙", code == 0 ? "Derült" : "Többnyire derült") : Describe(code);
+
+    private sealed record ForecastResponse(
+        [property: JsonPropertyName("daily")] Daily Daily,
+        [property: JsonPropertyName("hourly")] Hourly? Hourly);
+
+    private sealed record Hourly(
+        [property: JsonPropertyName("time")] string[] Time,
+        [property: JsonPropertyName("weather_code")] int?[] WeatherCode,
+        [property: JsonPropertyName("temperature_2m")] double?[] Temp,
+        [property: JsonPropertyName("precipitation_probability")] int?[]? PrecipitationProbability,
+        [property: JsonPropertyName("precipitation")] double?[]? Precipitation,
+        [property: JsonPropertyName("wind_speed_10m")] double?[]? Wind,
+        [property: JsonPropertyName("is_day")] int?[]? IsDay);
 
     private sealed record Daily(
         [property: JsonPropertyName("time")] string[] Time,
@@ -93,7 +140,8 @@ public class WeatherService(HttpClient external, LocalCache cache)
         [property: JsonPropertyName("temperature_2m_max")] double?[] Max,
         [property: JsonPropertyName("temperature_2m_min")] double?[] Min,
         [property: JsonPropertyName("precipitation_sum")] double?[] Precipitation,
-        [property: JsonPropertyName("precipitation_probability_max")] int?[]? PrecipitationProbability);
+        [property: JsonPropertyName("precipitation_probability_max")] int?[]? PrecipitationProbability,
+        [property: JsonPropertyName("wind_speed_10m_max")] double?[]? WindMax);
 
     private sealed record GeoResponse([property: JsonPropertyName("results")] GeoResult[]? Results);
 

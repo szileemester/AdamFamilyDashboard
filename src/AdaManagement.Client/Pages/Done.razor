@@ -2,52 +2,149 @@
 @inject ApiClient Api
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
+@inject UndoService Undo
+@implements IDisposable
 
-<PageTitle>Kész feladatok – Ada</PageTitle>
-<MudText Typo="Typo.h5" Class="mb-2">Kész feladatok</MudText>
+<PageTitle>Kész feladatok – Adam's family dashboard</PageTitle>
 
-<MudTextField @bind-Value="_query" Placeholder="Keresés…" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-              DebounceInterval="400" OnDebounceIntervalElapsed="_ => Load()" Immediate="true" Clearable="true" Class="mb-2" />
+@* kezdőkép kereséssel, alatta a kész feladatok plakát-kártyái a befejezés napja szerint csoportosítva. *@
+<section class="hero sub-hero">
+    <div class="hero-content">
+        <div class="hero-kicker">Archívum</div>
+        <div class="hero-head">
+            <div class="sub-hero-name">
+                <BackButton />
+                <h1 class="hero-title">Kész feladatok</h1>
+            </div>
+        </div>
+        @if (_items is { Count: > 0 })
+        {
+            var today = Format.Today;
+            <div class="hero-meta">
+                @* A szerver legfeljebb 200 elemet ad vissza (a legutóbbiakat): ennyinél „200+”. *@
+                <span class="hero-stat"><b>@(_items.Count >= MaxItems ? $"{MaxItems}+" : _items.Count)</b> @(string.IsNullOrWhiteSpace(_query) ? "kész feladat" : "találat")</span>
+                <span class="hero-stat"><b class="dn-ok">@_items.Count(t => DoneOn(t) == today)</b> ma</span>
+                <span class="hero-stat"><b>@_items.Count(t => DoneOn(t) > today.AddDays(-7))</b> az elmúlt 7 napban</span>
+            </div>
+        }
+        <MudTextField @bind-Value="_query" Placeholder="Keresés a kész feladatok között…" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      DebounceInterval="400" OnDebounceIntervalElapsed="_ => Load()" Immediate="true" Clearable="true"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="sub-search" UserAttributes="@(new() { ["aria-label"] = "Keresés a kész feladatok között" })" />
+    </div>
+</section>
 
 @if (_items is null)
 {
-    <MudProgressLinear Indeterminate="true" />
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
 else if (_items.Count == 0)
 {
-    <MudText Typo="Typo.caption">Nincs találat.</MudText>
+    <div class="sub-empty">@(string.IsNullOrWhiteSpace(_query) ? "Még nincs kész feladat." : "Nincs találat.")</div>
 }
 else
 {
-    <MudPaper Elevation="1" Class="pa-2">
-        @foreach (var t in _items)
-        {
-            <div class="task-row">
-                <div class="task-title">
-                    <MudText Typo="Typo.body2" Style="text-decoration:line-through">@t.Title</MudText>
-                    <MudText Typo="Typo.caption">Kész: @t.CompletedAt?.ToLocalTime().ToString("yyyy. MM. dd. HH:mm")</MudText>
-                </div>
-                <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small" title="Visszanyitás" OnClick="() => Reopen(t)" />
-                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" Size="Size.Small" Color="Color.Error" title="Végleges törlés" OnClick="() => Delete(t)" />
-            </div>
-        }
-    </MudPaper>
+    @foreach (var group in _items.GroupBy(t => GroupName(DoneOn(t))))
+    {
+        <h2 class="sub-section">@group.Key <span class="m-count">@group.Count()</span></h2>
+        <div class="rp-grid dn-grid">
+            @foreach (var t in group)
+            {
+                var q = Quadrants.Of(t.IsImportant, t.IsUrgent);
+                <article class="rp-card dn-card" style="@($"--hue:{t.Id * 47 % 360};--accent:var(--{q.Id})")">
+                    <div class="rp-art" aria-hidden="true"></div>
+                    <MudIcon Icon="@TaskIcons.For(t, q)" Class="rp-icon" aria-hidden="true" />
+                    <div class="rp-main dn-main">
+                        <div class="rp-badges">
+                            <span class="m-badge ok"><MudIcon Icon="@Icons.Material.Filled.Check" /> Kész</span>
+                            <span class="m-badge dn-quad">@q.ShortTitle</span>
+                            @if (t.RecurringTemplateId is not null) { <span class="m-badge">Ismétlődő</span> }
+                        </div>
+                        <div class="rp-title">@t.Title</div>
+                        <div class="rp-meta">
+                            <span title="Befejezve"><MudIcon Icon="@Icons.Material.Outlined.TaskAlt" /> @DoneText(t)</span>
+                            @if (t.DueDate is { } due)
+                            {
+                                <span title="Határidő" class="@(due < DoneOn(t) ? "dn-late" : "")"><MudIcon Icon="@Icons.Material.Outlined.Event" /> @Format.Date(due)</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="rp-actions">
+                        <button type="button" class="m-btn wide" title="Visszanyitás: visszakerül a mátrixba" @onclick="() => Reopen(t)">
+                            <MudIcon Icon="@Icons.Material.Filled.Undo" /><span>Visszanyitás</span>
+                        </button>
+                        <button type="button" class="m-btn rp-delete" title="Végleges törlés" aria-label="Végleges törlés" @onclick="() => Delete(t)">
+                            <MudIcon Icon="@Icons.Material.Outlined.DeleteForever" />
+                        </button>
+                    </div>
+                </article>
+            }
+        </div>
+    }
 }
 
 @code {
+    private const int MaxItems = 200;
     private string? _query;
     private List<TaskDto>? _items;
+    private int _loadVersion;   // gépelés közbeni keresésnél csak a legutolsó kérés eredménye számít
 
-    protected override Task OnInitializedAsync() => Load();
+    private static DateOnly DoneOn(TaskDto t) => DateOnly.FromDateTime(Format.ToLocal(t.CompletedAt ?? t.CreatedAt));
+
+    /// <summary>Csoport a befejezés napja szerint: Ma, Tegnap, Ezen a héten, utána hónaponként.</summary>
+    private static string GroupName(DateOnly d)
+    {
+        var today = Format.Today;
+        var ago = today.DayNumber - d.DayNumber;
+        if (ago <= 0) return "Ma";
+        if (ago == 1) return "Tegnap";
+        if (ago < 7) return "Az elmúlt héten";
+        var name = d.ToString("MMMM");
+        name = char.ToUpper(name[0]) + name[1..];
+        return d.Year == today.Year ? name : $"{d.Year}. {name}";
+    }
+
+    /// <summary>„ma 14:32”, „tegnap 9:05”, egyébként „nov. 3. 14:32”.</summary>
+    private static string DoneText(TaskDto t)
+    {
+        var at = Format.ToLocal(t.CompletedAt ?? t.CreatedAt);
+        var ago = Format.Today.DayNumber - DateOnly.FromDateTime(at).DayNumber;
+        var day = ago switch { <= 0 => "ma", 1 => "tegnap", _ => at.ToString(at.Year == Format.Today.Year ? "MMM d." : "yyyy. MMM d.") };
+        return $"{day} {at:HH:mm}";
+    }
+
+    protected override Task OnInitializedAsync()
+    {
+        Undo.Undone += OnUndone;
+        return Load();
+    }
+
+    // A fejléc visszavonás-ikonja után a visszanyitott feladat eltűnik a listából.
+    private async Task OnUndone()
+    {
+        await Load();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Undo.Undone -= OnUndone;
+    }
 
     private async Task Load()
     {
+        var version = ++_loadVersion;
         try
         {
-            var q = string.IsNullOrWhiteSpace(_query) ? "" : $"?q={Uri.EscapeDataString(_query)}";
-            _items = (await Api.GetAsync<List<TaskDto>>($"api/tasks/completed{q}"));
+            var q = string.IsNullOrWhiteSpace(_query) ? "" : $"?q={Uri.EscapeDataString(_query.Trim())}";
+            var items = await Api.GetAsync<List<TaskDto>>($"api/tasks/completed{q}");
+            if (version == _loadVersion) _items = items;
         }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items ??= []; }
+        catch (Exception ex)
+        {
+            if (version != _loadVersion) return;
+            Snackbar.Add(ex.Message, Severity.Error);
+            _items ??= [];
+        }
     }
 
     private async Task Reopen(TaskDto t)

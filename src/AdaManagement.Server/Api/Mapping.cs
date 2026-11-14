@@ -6,7 +6,7 @@ namespace AdaManagement.Server.Api;
 public static class Mapping
 {
     public static TaskDto ToDto(this TaskItem t) =>
-        new(t.Id, t.Title, t.Notes, t.IsImportant, t.IsUrgent, t.DueDate, t.CreatedAt, t.CompletedAt, t.RecurringTemplateId, t.OccurrenceDate);
+        new(t.Id, t.Title, t.Notes, t.IsImportant, t.IsUrgent, t.DueDate, t.CreatedAt, t.CompletedAt, t.RecurringTemplateId, t.OccurrenceDate, t.Icon);
 
     public static TemplateDto ToDto(this RecurringTemplate t) =>
         new(t.Id, t.Title, t.Notes, t.IntervalMonths, t.NextDueDate, t.SuggestedFollowingDueDate(), t.LeadDays, t.IsActive);
@@ -20,40 +20,78 @@ public static class Mapping
     public static string? Clean(this string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
 
-/// <summary>Egyszerű bemenet-ellenőrzés: hibaüzenetek mezőnként, ValidationProblem-hez.</summary>
+/// <summary>
+/// Egyszerű bemenet-ellenőrzés: hibaüzenetek mezőnként, ValidationProblem-hez. A hosszkorlátok az adatbázis
+/// oszlopaihoz igazodnak (így 400 jön az 500 helyett), a dátumok egy értelmes tartományban maradnak
+/// (a szélsőséges évek a hónap-/napszámolásnál túlcsordulnának).
+/// </summary>
 public static class Validate
 {
+    public static readonly DateOnly MinDate = new(1900, 1, 1);
+    public static readonly DateOnly MaxDate = new(2199, 12, 31);
+
+    public const int TitleMax = 200;
+    public const int NotesMax = 2000;
+    public const int ShortNotesMax = 1000;
+
     public static Dictionary<string, string[]> Task(TaskEditDto d)
     {
         var e = new Dictionary<string, string[]>();
-        if (string.IsNullOrWhiteSpace(d.Title)) e["Title"] = ["A cím kötelező."];
-        else if (d.Title.Length > 200) e["Title"] = ["Legfeljebb 200 karakter."];
+        Text(e, "Title", d.Title, TitleMax, required: "A cím kötelező.");
+        Text(e, "Notes", d.Notes, NotesMax);
+        if (d.Icon is { Length: > 40 }) e["Icon"] = ["Érvénytelen ikon."];
+        Date(e, "DueDate", d.DueDate);
         return e;
     }
 
     public static Dictionary<string, string[]> Template(TemplateEditDto d)
     {
         var e = new Dictionary<string, string[]>();
-        if (string.IsNullOrWhiteSpace(d.Title)) e["Title"] = ["A cím kötelező."];
+        Text(e, "Title", d.Title, TitleMax, required: "A cím kötelező.");
+        Text(e, "Notes", d.Notes, NotesMax);
         if (d.IntervalMonths is < 1 or > 240) e["IntervalMonths"] = ["1 és 240 hónap között."];
         if (d.LeadDays is < 0 or > 365) e["LeadDays"] = ["0 és 365 nap között."];
+        Date(e, "NextDueDate", d.NextDueDate);
         return e;
     }
 
-    public static Dictionary<string, string[]> Birthday(BirthdayEditDto d)
+    public static Dictionary<string, string[]> Completion(CompleteOccurrenceDto d)
     {
         var e = new Dictionary<string, string[]>();
-        if (string.IsNullOrWhiteSpace(d.Name)) e["Name"] = ["A név kötelező."];
+        Text(e, "Note", d.Note, ShortNotesMax);
+        Date(e, "CompletedOn", d.CompletedOn);
+        Date(e, "NextDueDate", d.NextDueDate);
+        return e;
+    }
+
+    public static Dictionary<string, string[]> Birthday(BirthdayEditDto d, DateOnly today)
+    {
+        var e = new Dictionary<string, string[]>();
+        Text(e, "Name", d.Name, TitleMax, required: "A név kötelező.");
+        Text(e, "Notes", d.Notes, ShortNotesMax);
         if (!BirthdayCalculator.IsValid(d.Month, d.Day)) e["Day"] = ["Érvénytelen dátum."];
-        if (d.Year is { } y && (y < 1900 || y > 2100)) e["Year"] = ["1900 és 2100 között."];
+        if (d.Year is { } y && (y < 1900 || y > today.Year)) e["Year"] = [$"1900 és {today.Year} között."];
         return e;
     }
 
     public static Dictionary<string, string[]> Settings(SettingsDto d)
     {
         var e = new Dictionary<string, string[]>();
-        if (d.Latitude is < -90 or > 90 || d.Longitude is < -180 or > 180) e["Latitude"] = ["Érvénytelen koordináta."];
+        if (!double.IsFinite(d.Latitude) || !double.IsFinite(d.Longitude) || d.Latitude is < -90 or > 90 || d.Longitude is < -180 or > 180)
+            e["Latitude"] = ["Érvénytelen koordináta."];
+        Text(e, "WeatherLabel", d.WeatherLabel, TitleMax);
         if (d.BirthdayLookaheadDays is < 1 or > 366) e["BirthdayLookaheadDays"] = ["1 és 366 nap között."];
         return e;
+    }
+
+    private static void Text(Dictionary<string, string[]> e, string field, string? value, int max, string? required = null)
+    {
+        if (required is not null && string.IsNullOrWhiteSpace(value)) e[field] = [required];
+        else if (value is not null && value.Trim().Length > max) e[field] = [$"Legfeljebb {max} karakter."];
+    }
+
+    private static void Date(Dictionary<string, string[]> e, string field, DateOnly? value)
+    {
+        if (value is { } d && (d < MinDate || d > MaxDate)) e[field] = [$"{MinDate.Year} és {MaxDate.Year} közötti dátum legyen."];
     }
 }

@@ -1,20 +1,30 @@
 ﻿@inherits LayoutComponentBase
 @implements IDisposable
 @inject ThemeService Themes
+@inject NavigationManager Nav
 
 <MudThemeProvider Theme="Themes.Current.MudTheme" IsDarkMode="Themes.Current.IsDark" />
 <MudPopoverProvider />
-<MudDialogProvider MaxWidth="MaxWidth.Small" FullWidth="true" CloseButton="true" />
 <MudSnackbarProvider />
 
 <AnimatedBackground />
 
 <div class="@($"app-root {Themes.CssClass}")">
+    @* A párbeszédablakok a téma-osztályon belül jelennek meg, így megkapják a téma színeit (--q1…, .theme-mozi). *@
+    <MudDialogProvider MaxWidth="MaxWidth.Small" FullWidth="true" CloseButton="true" />
     <MudLayout>
         <MudAppBar Elevation="0" Dense="true">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="() => _drawer = !_drawer" aria-label="Menü" />
-            <MudText Typo="Typo.h6" Class="ml-2 app-title">Ada</MudText>
+            @* A cím hazavisz az áttekintésre, és becsukja az oldalsó menüt. *@
+            <a href="" class="app-title-link" @onclick="() => _drawer = false" aria-label="Áttekintés">
+                <MudText Typo="Typo.h6" Class="ml-2 app-title">Adam's family dashboard</MudText>
+            </a>
             <MudSpacer />
+            @* Visszavonás: a kezdőképen az „Ismétlődők” mellett, az Ismétlődő oldalon az „Új” mellett van, máshol itt. *@
+            @if (Path != "" && Path != "ismetlodo")
+            {
+                <UndoButton />
+            }
             <MudMenu Icon="@Icons.Material.Outlined.Palette" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight"
                      Dense="true" aria-label="Téma">
                 <MudText Typo="Typo.overline" Class="px-4">Téma</MudText>
@@ -23,15 +33,6 @@
                     <MudMenuItem OnClick="() => Themes.SetThemeAsync(t.Id)"
                                  Icon="@(Themes.Current.Id == t.Id ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)">
                         @t.Name
-                    </MudMenuItem>
-                }
-                <MudDivider Class="my-1" />
-                <MudText Typo="Typo.overline" Class="px-4">Háttér</MudText>
-                @foreach (var (value, label) in AnimationOptions)
-                {
-                    <MudMenuItem OnClick="() => Themes.SetAnimationAsync(value)"
-                                 Icon="@(Themes.Animation == value ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)">
-                        @label
                     </MudMenuItem>
                 }
             </MudMenu>
@@ -52,45 +53,31 @@
         </MudDrawer>
 
         <MudMainContent>
-            <MudContainer MaxWidth="MaxWidth.Large" Class="@($"py-3 px-2 px-sm-4 {(HasBottomNav ? "with-bottom-nav" : "")}")">
+            <MudContainer MaxWidth="MaxWidth.False" Class="mozi-main">
                 @Body
             </MudContainer>
         </MudMainContent>
     </MudLayout>
-
-    @if (HasBottomNav)
-    {
-        <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
-            <nav class="bottom-nav">
-                <NavLink href="" Match="NavLinkMatch.All" aria-label="Áttekintés"><MudIcon Icon="@Icons.Material.Outlined.GridView" /></NavLink>
-                <NavLink href="ismetlodo" aria-label="Ismétlődő"><MudIcon Icon="@Icons.Material.Outlined.EventRepeat" /></NavLink>
-                <NavLink href="szuletesnapok" aria-label="Születésnapok"><MudIcon Icon="@Icons.Material.Outlined.Cake" /></NavLink>
-                <NavLink href="kesz" aria-label="Kész"><MudIcon Icon="@Icons.Material.Outlined.TaskAlt" /></NavLink>
-                <NavLink href="beallitasok" aria-label="Beállítások"><MudIcon Icon="@Icons.Material.Outlined.Settings" /></NavLink>
-            </nav>
-        </MudHidden>
-    }
 </div>
 
 @code {
     private bool _drawer;
 
-    public static readonly (BackgroundAnimation Value, string Label)[] AnimationOptions =
-    [
-        (BackgroundAnimation.Hangulat, "Hangulat (témához illő)"),
-        (BackgroundAnimation.Idojaras, "Időjárás szerint"),
-        (BackgroundAnimation.Ki, "Kikapcsolva"),
-    ];
-
-    private bool HasBottomNav => Themes.Current.Layout == MatrixLayout.Fulek;
+    private string Path => Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/');
 
     protected override async Task OnInitializedAsync()
     {
         Themes.Changed += OnThemeChanged;
+        Nav.LocationChanged += OnLocationChanged;
         await Themes.LoadAsync();
     }
 
     private void OnThemeChanged() => InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Themes.Changed -= OnThemeChanged;
+    public void Dispose()
+    {
+        Themes.Changed -= OnThemeChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
 }

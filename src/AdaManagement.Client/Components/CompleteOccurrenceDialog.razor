@@ -36,7 +36,7 @@
 
     protected override void OnInitialized()
     {
-        _completedOn = Format.ToDateTime(Today == default ? DateOnly.FromDateTime(DateTime.Today) : Today);
+        _completedOn = Format.ToDateTime(Today == default ? Format.Today : Today);
         _next = Format.ToDateTime(Template.SuggestedFollowingDueDate);
     }
 

@@ -11,6 +11,9 @@ public class TaskItem
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 
+    /// <summary>Kézzel választott ikon kulcsa (a kliens ikonkatalógusából); null = automatikus a cím alapján.</summary>
+    public string? Icon { get; set; }
+
     /// <summary>Ha ismétlődő sablonból generálódott: a sablon azonosítója.</summary>
     public int? RecurringTemplateId { get; set; }
     public RecurringTemplate? RecurringTemplate { get; set; }
@@ -35,6 +38,9 @@ public class RecurringTemplate
     public int LeadDays { get; set; } = 14;
     public bool IsActive { get; set; } = true;
 
+    /// <summary>Törlés időpontja. A törölt sablon egy napig visszaállítható (Visszavonás), utána véglegesen törlődik.</summary>
+    public DateTime? DeletedAt { get; set; }
+
     public List<CompletionLogEntry> Log { get; set; } = [];
 
     /// <summary>Új horgonyt állít: a megadott dátum lesz a következő esedékesség.</summary>
@@ -43,6 +49,32 @@ public class RecurringTemplate
         AnchorDate = nextDueDate;
         OccurrenceIndex = 0;
         NextDueDate = nextDueDate;
+    }
+
+    /// <summary>
+    /// Intervallum-váltás változatlan következő esedékességgel. Ha a horgony napja (pl. 31.) a mostani dátumon a hónap
+    /// vége miatt le volt vágva (feb 28), olyan korábbi horgonyt keres ugyanazzal a nappal, amelyből az új intervallummal
+    /// pont a mostani esedékesség jön ki – így a későbbi alkalmak újra 31-ére esnek. Ha nincs ilyen, a mostani dátum az új horgony.
+    /// </summary>
+    public void ChangeInterval(int intervalMonths)
+    {
+        var due = NextDueDate;
+        var day = AnchorDate.Day;
+        IntervalMonths = intervalMonths;
+        if (day > due.Day)
+        {
+            for (var k = 1; k <= 24; k++)
+            {
+                var month = due.AddMonths(-intervalMonths * k);
+                if (DateTime.DaysInMonth(month.Year, month.Month) < day) continue;
+                var anchor = new DateOnly(month.Year, month.Month, day);
+                if (RecurrenceCalculator.DueDate(anchor, intervalMonths, k) != due) continue;
+                AnchorDate = anchor;
+                OccurrenceIndex = k;
+                return;
+            }
+        }
+        Reschedule(due);
     }
 
     /// <summary>A jelenlegi alkalom utáni esedékesség, ha nem írod át kézzel.</summary>

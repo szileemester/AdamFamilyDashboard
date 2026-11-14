@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace AdaManagement.Server.Auth;
 
@@ -50,11 +51,16 @@ public static class AuthSetup
             {
                 o.ClientId = googleId!;
                 o.ClientSecret = googleSecret!;
-                o.Events.OnCreatingTicket = ctx =>
+                // Az allowlist itt dől el: a TicketReceived a cookie kiadása ELŐTT fut, és a HandleResponse()
+                // valóban megállítja a bejelentkezést (az OnCreatingTicket-beli Fail()-t a handler figyelmen kívül hagyja).
+                o.Events.OnTicketReceived = ctx =>
                 {
                     var email = ctx.Principal?.FindFirstValue(ClaimTypes.Email);
                     if (email is null || !allowedSet.Contains(email))
-                        ctx.Fail("Ez a Google-fiók nincs engedélyezve.");
+                    {
+                        ctx.Response.Redirect("/account/denied");
+                        ctx.HandleResponse();
+                    }
                     return Task.CompletedTask;
                 };
                 o.Events.OnRemoteFailure = ctx =>
@@ -115,6 +121,8 @@ public static class AuthSetup
 
         g.MapPost("/logout", async (HttpContext ctx) =>
         {
+            // Idegen oldalról beküldött űrlap ne léptessen ki (a böngésző cross-site POST-nál küldi az Origin fejlécet).
+            if (!IsSameOrigin(ctx)) return Results.BadRequest();
             await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             // Nem a kezdőlapra: onnan a 401 miatt azonnal újra a bejelentkezésre (és dev-ben/Google-nél vissza) dobna.
             return Results.Redirect("/account/signed-out");
@@ -133,7 +141,7 @@ public static class AuthSetup
               a{display:inline-block;background:#AFA9EC;color:#111114;text-decoration:none;font-weight:500;padding:.7rem 1.4rem;border-radius:10px}
             </style>
             <main><h1>Kijelentkeztél</h1><p>Ezen az eszközön nincs több mentett adat.</p><a href="/account/login">Bejelentkezés</a></main>
-            <script>try{localStorage.removeItem('ada.dashboard')}catch(e){}</script>
+            <script>try{['ada.dashboard','ada.weather'].forEach(k=>localStorage.removeItem(k))}catch(e){}</script>
             </html>
             """, "text/html; charset=utf-8"));
 
@@ -158,6 +166,17 @@ public static class AuthSetup
         }
     }
 
-    private static bool IsLocal(string? url) =>
-        !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") && !url.StartsWith("/\\");
+    /// <summary>Csak saját oldalra irányítunk vissza. A beépített ellenőrzés a vezérlőkaraktereket is kiszűri
+    /// (pl. „/%09/evil.com” → a böngészőben „//evil.com” lenne).</summary>
+    private static bool IsLocal(string? url) => !string.IsNullOrEmpty(url) && RedirectHttpResult.IsLocalUrl(url);
+
+    private static bool IsSameOrigin(HttpContext ctx)
+    {
+        var origin = ctx.Request.Headers.Origin.ToString();
+        if (string.IsNullOrEmpty(origin))
+            // Origin nélkül a Sec-Fetch-Site dönt (régebbi böngésző vagy nem böngésző: engedjük).
+            return ctx.Request.Headers["Sec-Fetch-Site"].ToString() is "" or "same-origin" or "none";
+        return Uri.TryCreate(origin, UriKind.Absolute, out var o) &&
+               string.Equals(o.Authority, ctx.Request.Host.Value, StringComparison.OrdinalIgnoreCase);
+    }
 }

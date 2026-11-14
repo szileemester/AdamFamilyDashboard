@@ -3,11 +3,11 @@
 
 <MudDialog>
     <DialogContent>
-        <MudTextField @bind-Value="_title" Label="Megnevezés" Required="true" MaxLength="200" AutoFocus="true" Placeholder="pl. Olajcsere" />
+        <MudTextField @bind-Value="_title" Label="Megnevezés" Required="true" RequiredError="Add meg a megnevezést." MaxLength="200" AutoFocus="true" Placeholder="pl. Olajcsere" />
         <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="2" MaxLength="2000" />
         <MudNumericField @bind-Value="_interval" Label="Ismétlődés (hónap)" Min="1" Max="240"
                          HelperText="@IntervalHelp" />
-        <MudDatePicker @bind-Date="_next" Label="Következő esedékesség" Editable="true" DateFormat="yyyy.MM.dd" Required="true" />
+        <MudDatePicker @bind-Date="_next" Label="Következő esedékesség" Editable="true" DateFormat="yyyy.MM.dd" Required="true" RequiredError="Add meg a dátumot." />
         <MudNumericField @bind-Value="_lead" Label="Ennyi nappal előtte kerüljön a mátrixba" Min="0" Max="365" />
         <MudSwitch @bind-Value="_active" Label="Aktív" Color="Color.Primary" Class="mt-2" />
     </DialogContent>
@@ -25,7 +25,7 @@
     private string? _title;
     private string? _notes;
     private int _interval = 12;
-    private DateTime? _next = DateTime.Today.AddMonths(1);
+    private DateTime? _next = Format.Today.AddMonths(1).ToDateTime(TimeOnly.MinValue);
     private int _lead = 14;
     private bool _active = true;
     private bool _busy;

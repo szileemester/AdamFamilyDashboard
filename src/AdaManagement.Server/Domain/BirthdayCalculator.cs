@@ -1,25 +1,17 @@
+using AdaManagement.Shared;
+
 namespace AdaManagement.Server.Domain;
 
+/// <summary>A dashboard „Hamarosan” listája. A dátumszámolás a közös <see cref="BirthdayDates"/>-ben van.</summary>
 public static class BirthdayCalculator
 {
-    /// <summary>A születésnap dátuma az adott évben. Feb 29 nem szökőévben → Feb 28.</summary>
-    public static DateOnly DateInYear(int year, int month, int day) =>
-        month == 2 && day == 29 && !DateTime.IsLeapYear(year)
-            ? new DateOnly(year, 2, 28)
-            : new DateOnly(year, month, day);
+    public static DateOnly DateInYear(int year, int month, int day) => BirthdayDates.DateInYear(year, month, day);
 
-    /// <summary>A legközelebbi előfordulás ma vagy később.</summary>
-    public static DateOnly NextOccurrence(int month, int day, DateOnly today)
-    {
-        var thisYear = DateInYear(today.Year, month, day);
-        return thisYear >= today ? thisYear : DateInYear(today.Year + 1, month, day);
-    }
+    public static DateOnly NextOccurrence(int month, int day, DateOnly today) => BirthdayDates.NextOccurrence(month, day, today);
 
-    public static int? TurningAge(int? birthYear, DateOnly occurrence) =>
-        birthYear is null ? null : occurrence.Year - birthYear.Value;
+    public static int? TurningAge(int? birthYear, DateOnly occurrence) => BirthdayDates.TurningAge(birthYear, occurrence);
 
-    public static bool IsValid(int month, int day) =>
-        month is >= 1 and <= 12 && day >= 1 && day <= DateTime.DaysInMonth(2024, month); // 2024 szökőév: a feb 29 érvényes
+    public static bool IsValid(int month, int day) => BirthdayDates.IsValid(month, day);
 
     public static IReadOnlyList<(Birthday Birthday, DateOnly Date, int DaysUntil, int? TurningAge)> Upcoming(
         IEnumerable<Birthday> birthdays, DateOnly today, int lookaheadDays) =>

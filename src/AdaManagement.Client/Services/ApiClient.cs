@@ -5,7 +5,11 @@ using Microsoft.AspNetCore.Components;
 
 namespace AdaManagement.Client.Services;
 
-public class ApiException(string message) : Exception(message);
+/// <param name="statusCode">A HTTP státuszkód (0, ha nem a szervertől jött válasz).</param>
+public class ApiException(string message, int statusCode = 0) : Exception(message)
+{
+    public int StatusCode { get; } = statusCode;
+}
 
 /// <summary>
 /// Vékony réteg az /api fölött. 401 esetén a szerveroldali Google loginra navigál (BFF),
@@ -42,11 +46,11 @@ public class ApiClient(HttpClient http, NavigationManager nav)
         {
             var returnUrl = "/" + nav.ToBaseRelativePath(nav.Uri);
             nav.NavigateTo($"/account/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
-            throw new ApiException("Bejelentkezés szükséges.");
+            throw new ApiException("Bejelentkezés szükséges.", 401);
         }
 
         if (!response.IsSuccessStatusCode)
-            throw new ApiException(await ErrorMessageAsync(response, ct));
+            throw new ApiException(await ErrorMessageAsync(response, ct), (int)response.StatusCode);
 
         return response;
     }

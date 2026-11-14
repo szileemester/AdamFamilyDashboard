@@ -1,0 +1,5 @@
+@* Vissza az áttekintésre. Telefonon és telepített appként látszik (ott nincs böngészős vissza gomb), asztali böngészőben rejtett. *@
+@inject NavigationManager Nav
+
+<MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Class="back-btn" Edge="Edge.Start" aria-label="Vissza az áttekintésre"
+               title="Vissza" OnClick="@(() => Nav.NavigateTo(""))" />

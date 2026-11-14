@@ -1,0 +1,174 @@
+@* Heti előrejelzés: az időjárás blokkra kattintva nyílik. Soronként egy nap; a hőmérséklet-sáv a hét
+   legalacsonyabb és legmagasabb értékéhez méretezett, így ránézésre látszik, melyik nap hidegebb/melegebb. *@
+@inject WeatherService Weather
+
+<MudDialog Class="weather-week-dialog">
+    <TitleContent>
+        <div class="ww-title">
+            <span>Heti előrejelzés</span>
+            <span class="ww-place">@Label</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_forecast is null)
+        {
+            <div class="ww-status">@(_error ?? "Előrejelzés betöltése…")</div>
+        }
+        else
+        {
+            var lo = _forecast.Days.Min(d => d.Min);
+            var hi = _forecast.Days.Max(d => d.Max);
+            var span = Math.Max(1, hi - lo);
+            var now = Format.Now;
+            <ol class="ww-list">
+                @foreach (var (day, i) in _forecast.Days.Select((d, i) => (d, i)))
+                {
+                    var (icon, text) = WeatherService.Describe(day.Code);
+                    var open = _openDay == day.Date;
+                    var hours = _forecast.HoursOf(day.Date, now).ToList();
+                    <li class="@($"ww-day {(i == 0 ? "today" : "")} {(open ? "open" : "")}")">
+                        @* A napra kattintva lenyílik az órás bontás; egyszerre csak egy nap lehet nyitva. *@
+                        <div class="ww-head" role="button" tabindex="0" aria-expanded="@(open ? "true" : "false")"
+                             @onclick="() => Toggle(day.Date)">
+                        <div class="ww-when">
+                            <b>@DayName(day.Date, i)</b>
+                            <span>@day.Date.ToString("MMM d.")</span>
+                        </div>
+                        <div class="ww-icon" title="@text" aria-hidden="true">@icon</div>
+                        <div class="ww-desc">
+                            <span class="ww-text">@text</span>
+                            <span class="ww-extra">
+                                <span title="Csapadék">💧 @day.PrecipitationMm.ToString("0.#") mm@(day.PrecipitationProbability is { } p ? $" · {p}%" : "")</span>
+                                @if (day.WindMaxKmh is { } w)
+                                {
+                                    <span title="Legerősebb szél">💨 @Math.Round(w) km/h</span>
+                                }
+                            </span>
+                        </div>
+                        <div class="ww-temps" aria-label="@($"{Math.Round(day.Min)}–{Math.Round(day.Max)} fok")">
+                            <span class="ww-min">@Math.Round(day.Min)°</span>
+                            <span class="ww-bar">
+                                <span class="ww-range" style="@($"left:{Pct(day.Min - lo, span)}%;right:{Pct(hi - day.Max, span)}%")"></span>
+                            </span>
+                            <span class="ww-max">@Math.Round(day.Max)°</span>
+                            <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Class="ww-chevron" />
+                        </div>
+                        </div>
+                        <div class="ww-hours" aria-hidden="@(open ? "false" : "true")">
+                            <div class="ww-hours-inner">
+                                @if (hours.Count == 0)
+                                {
+                                    <div class="ww-status">Ehhez a naphoz nincs órás adat.</div>
+                                }
+                                else
+                                {
+                                    @HourStrip(hours)
+                                }
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ol>
+            <div class="ww-foot">
+                Frissítve: @Format.ToLocal(_forecast.FetchedAtUtc).ToString("HH:mm") · Open-Meteo
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading" OnClick="() => Load(true)">Frissítés</MudButton>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => MudDialog.Close()">Bezár</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SettingsDto Settings { get; set; } = default!;
+
+    private WeatherForecast? _forecast;
+    private string? _error;
+    private bool _loading;
+
+    private string Label => Settings.WeatherLabel;
+
+    public static Task ShowAsync(IDialogService dialogs, SettingsDto settings) =>
+        dialogs.ShowAsync<WeatherWeekDialog>("Heti előrejelzés",
+            new DialogParameters<WeatherWeekDialog> { { x => x.Settings, settings } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true });
+
+    protected override async Task OnInitializedAsync()
+    {
+        // A tárolt adat (ugyanehhez a helyhez, a mai naptól) azonnal látszik, a friss utána érkezik.
+        _forecast = await Weather.GetCachedAsync(Settings.Latitude, Settings.Longitude);
+        await Load(false);
+    }
+
+    private async Task Load(bool force)
+    {
+        _loading = true;
+        try
+        {
+            _forecast = await Weather.GetAsync(Settings.WeatherLabel, Settings.Latitude, Settings.Longitude, force);
+            _error = null;
+        }
+        catch
+        {
+            _error = "Az időjárás most nem érhető el.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private DateOnly? _openDay;
+
+    private void Toggle(DateOnly date) => _openDay = _openDay == date ? null : date;
+
+    // Órás sáv: óránként egy oszlop (idő, ikon, hőmérséklet a görbén, csapadék-esély). A görbe egy SVG vonal
+    // az oszlopok közepén; a pontok magassága a nap legalacsonyabb–legmagasabb órás hőmérsékletéhez skálázott.
+    private const int Cell = 46, Band = 26;
+
+    private static RenderFragment HourStrip(List<WeatherHour> hours) => __builder =>
+    {
+        var lo = hours.Min(h => h.Temp);
+        var hi = hours.Max(h => h.Temp);
+        var range = Math.Max(1, hi - lo);
+        double Y(double t) => (1 - (t - lo) / range) * Band;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var points = string.Join(" ", hours.Select((h, i) => $"{(i * Cell + Cell / 2.0).ToString(inv)},{(Y(h.Temp) + 20).ToString("0.#", inv)}"));
+        <div class="ww-strip" style="@($"--cells:{hours.Count}")">
+            <svg class="ww-curve" width="@(hours.Count * Cell)" height="@(Band + 26)" aria-hidden="true">
+                <polyline points="@points" />
+                @foreach (var (h, i) in hours.Select((h, i) => (h, i)))
+                {
+                    <circle cx="@((i * Cell + Cell / 2.0).ToString(inv))" cy="@((Y(h.Temp) + 20).ToString("0.#", inv))" r="2.6" />
+                }
+            </svg>
+            @foreach (var h in hours)
+            {
+                var (hi2, ht) = WeatherService.Describe(h.Code, h.IsDay);
+                <div class="ww-hour" title="@($"{h.Time:HH}:00 · {ht}{(h.WindKmh is { } w ? $" · szél {Math.Round(w)} km/h" : "")}")">
+                    <span class="ww-h-time">@h.Time.ToString("HH")</span>
+                    <span class="ww-h-icon">@hi2</span>
+                    <span class="ww-h-band">
+                        <span class="ww-h-temp" style="@($"top:{Y(h.Temp).ToString("0.#", inv)}px")">@Math.Round(h.Temp)°</span>
+                    </span>
+                    <span class="@($"ww-h-rain {(h.PrecipitationProbability is >= 30 ? "wet" : "")}")">
+                        @(h.PrecipitationProbability is >= 10 and var p ? $"{p}%" : "")
+                    </span>
+                </div>
+            }
+        </div>
+    };
+
+    private static string Pct(double part, double whole) =>
+        Math.Clamp(part / whole * 100, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string DayName(DateOnly d, int i) => i switch
+    {
+        0 => "Ma",
+        1 => "Holnap",
+        _ => System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(d.ToString("dddd")),
+    };
+}

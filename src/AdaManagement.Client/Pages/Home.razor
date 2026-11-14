@@ -1,11 +1,11 @@
-﻿@page "/"
+@page "/"
 @inject ApiClient Api
 @inject LocalCache Cache
-@inject ISnackbar Snackbar
-@inject ThemeService Themes
+@inject IDialogService Dialogs
+@inject UndoService Undo
 @implements IDisposable
 
-<PageTitle>Ada</PageTitle>
+<PageTitle>Adam's family dashboard</PageTitle>
 
 @if (_data is null)
 {
@@ -39,65 +39,76 @@ else
         <MudProgressLinear Indeterminate="@(_error is null)" Color="Color.Primary" Class="mb-2" />
     }
 
-    var theme = Themes.Current.Id;
+    var urgent = _tasks.Count(t => t.IsImportant && t.IsUrgent);
+    var overdue = _tasks.Count(t => t.DueDate < _data.Today);
     <div class="@(_stale ? "stale" : "")">
-        @switch (theme)
-        {
-            case AppTheme.Csendes:
-                <div class="day-head">
-                    <span class="day-title">Ma</span>
-                    <span class="mud-text-secondary">@_data.Today.ToString("MMMM d., dddd")</span>
+        <section class="hero">
+            <div class="hero-content">
+                <div class="hero-kicker">@_data.Today.ToString("dddd · MMMM d.")</div>
+                @* Tömör kezdőkép: a gombok a cím mellett (keskeny ablakban alá törnek) *@
+                <div class="hero-head">
+                    <h1 class="hero-title">@_cheer</h1>
+                    <div class="hero-actions">
+                        <button type="button" class="hero-btn primary" disabled="@_stale" @onclick="NewTask">
+                            <MudIcon Icon="@Icons.Material.Filled.Add" /> Új feladat
+                        </button>
+                        <a class="hero-btn" href="ismetlodo"><MudIcon Icon="@Icons.Material.Outlined.EventRepeat" /> Ismétlődők</a>
+                        <UndoButton Hero="true" />
+                    </div>
                 </div>
-                <WeatherCard Settings="_data.Settings" Theme="theme" />
-                <div class="mb-2"><UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" /></div>
-                break;
-
-            case AppTheme.Meleg:
-                <div class="greeting">@Greeting</div>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">@_data.Today.ToString("MMMM d., dddd")</MudText>
-                <WeatherCard Settings="_data.Settings" Theme="theme" />
-                <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" />
-                break;
-
-            case AppTheme.Bento:
-                <MudGrid Spacing="2" Class="mb-2">
-                    <MudItem xs="5" md="4">
-                        <WeatherCard Settings="_data.Settings" Theme="theme" />
-                    </MudItem>
-                    <MudItem xs="7" md="8">
-                        <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" />
-                    </MudItem>
-                </MudGrid>
-                break;
-
-            default:
-                <MudGrid Spacing="2" Class="mb-2">
-                    <MudItem xs="12" md="5">
-                        <WeatherCard Settings="_data.Settings" Theme="theme" />
-                    </MudItem>
-                    <MudItem xs="12" md="7">
-                        <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" Theme="theme" />
-                    </MudItem>
-                </MudGrid>
-                break;
-        }
+                <div class="hero-meta">
+                    <span class="hero-stat"><b class="q-color-q1">@urgent</b> azonnali</span>
+                    <span class="hero-stat"><b>@_tasks.Count</b> nyitott</span>
+                    @if (overdue > 0) { <span class="hero-stat"><b class="overdue">@overdue</b> lejárt</span> }
+                    <WeatherCard Settings="_data.Settings" />
+                </div>
+            </div>
+            <UpcomingCard Birthdays="_data.Birthdays" Maintenance="_data.Maintenance" />
+        </section>
 
         <Matrix Tasks="_tasks" Today="_data.Today" ReadOnly="_stale" OnChanged="Refresh" />
     </div>
 }
 
 @code {
-    /// <summary>Napszakhoz illő köszönés (budapesti idő szerint a böngészőben).</summary>
-    private static string Greeting => DateTime.Now.Hour switch
+    /// <summary>Kezdőkép: oldalbetöltésenként egy véletlen biztató üzenet.</summary>
+    private static readonly string[] Cheers =
+    [
+        "Ma is jó napod lesz!",
+        "Megy ez neked!",
+        "Kis lépések, nagy eredmények.",
+        "Egyszerre csak egy dolog.",
+        "Minden kipipált feladat számít.",
+        "Lendületben vagy!",
+        "Jól haladsz, csak így tovább!",
+        "A mai nap a tiéd.",
+        "Kezdd a legfontosabbal!",
+        "Ami ma kész, holnap nem nyomaszt.",
+        "Nyugi, minden belefér.",
+        "Szép munka eddig!",
+        "Büszke lehetsz magadra.",
+        "Egy lépés is haladás.",
+        "Hiszek benned!",
+        "Pihenni is ér.",
+        "Ma te irányítasz.",
+        "Lassan járj, tovább érsz.",
+    ];
+    private readonly string _cheer = Cheers[Random.Shared.Next(Cheers.Length)];
+
+    /// <summary>Az „Új feladat” gomb a szerkesztő ablakot nyitja.</summary>
+    private async Task NewTask()
     {
-        < 10 => "Jó reggelt!",
-        < 18 => "Szép napot!",
-        _ => "Jó estét!",
-    };
+        if (await TaskEditDialog.ShowAsync(Dialogs, null)) await Refresh();
+    }
 
-    private void OnThemeChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Undo.Undone -= OnUndone;
 
-    public void Dispose() => Themes.Changed -= OnThemeChanged;
+    // Visszavonás (pl. véletlen „Kész”) után a friss állapot kell.
+    private async Task OnUndone()
+    {
+        await Refresh();
+        await InvokeAsync(StateHasChanged);
+    }
 
     private const string CacheKey = "ada.dashboard";
     private DashboardDto? _data;
@@ -107,7 +118,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        Themes.Changed += OnThemeChanged;
+        Undo.Undone += OnUndone;
 
         // 1) Azonnal: az utolsó mentett állapot (csak olvasható).
         var cached = await Cache.GetAsync<DashboardDto>(CacheKey);

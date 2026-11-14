@@ -33,6 +33,21 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 var app = builder.Build();
 
 app.UseForwardedHeaders();
+
+// Biztonsági fejlécek minden válaszra: idegen oldal nem ágyazhatja be (clickjacking), nincs MIME-találgatás.
+app.Use((ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        var h = ctx.Response.Headers;
+        h["Content-Security-Policy"] = "frame-ancestors 'none'";
+        h["X-Frame-Options"] = "DENY";
+        h["X-Content-Type-Options"] = "nosniff";
+        h["Referrer-Policy"] = "same-origin";
+        return Task.CompletedTask;
+    });
+    return next(ctx);
+});
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler();

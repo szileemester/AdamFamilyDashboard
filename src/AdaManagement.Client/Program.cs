@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using AdaManagement.Client;
 using AdaManagement.Client.Services;
 using Microsoft.AspNetCore.Components.Web;
@@ -16,10 +16,11 @@ CultureInfo.DefaultThreadCurrentUICulture = hu;
 builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 builder.Services.AddScoped<ApiClient>();
 builder.Services.AddScoped<LocalCache>();
-builder.Services.AddScoped<UndoSnackbar>();
+builder.Services.AddScoped<UndoService>();
 builder.Services.AddScoped<ThemeService>();
 // Open-Meteo: külön HttpClient, base address és egyedi fejlécek nélkül.
 builder.Services.AddScoped(sp => new WeatherService(new HttpClient(), sp.GetRequiredService<LocalCache>()));
 builder.Services.AddMudServices();
+builder.Services.AddTransient<MudBlazor.MudLocalizer, HungarianMudLocalizer>(); // „Required” helyett „Kötelező mező.” stb.
 
 await builder.Build().RunAsync();

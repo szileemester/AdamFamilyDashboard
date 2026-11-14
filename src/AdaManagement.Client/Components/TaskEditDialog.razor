@@ -4,12 +4,37 @@
 
 <MudDialog>
     <DialogContent>
-        <MudTextField @bind-Value="_title" Label="Cím" Required="true" MaxLength="200" AutoFocus="true" />
+        <MudTextField @bind-Value="_title" Label="Feladat" Required="true" RequiredError="Add meg, mi a feladat." MaxLength="200" AutoFocus="true" Immediate="true" />
+        @* Fontos / sürgős: két, teljes szélességet kitöltő kapcsológomb közvetlenül a feladat alatt. *@
+        <div class="flag-toggles">
+            <button type="button" class="@($"flag-toggle {(_important ? "on-important" : "")}")" aria-pressed="@_important"
+                    @onclick="() => _important = !_important">
+                <MudIcon Icon="@(_important ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarOutline)" /> Fontos
+            </button>
+            <button type="button" class="@($"flag-toggle {(_urgent ? "on-urgent" : "")}")" aria-pressed="@_urgent"
+                    @onclick="() => _urgent = !_urgent">
+                <MudIcon Icon="@(_urgent ? Icons.Material.Filled.Bolt : Icons.Material.Outlined.Bolt)" /> Sürgős
+            </button>
+        </div>
         <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="3" MaxLength="2000" />
         <MudDatePicker @bind-Date="_due" Label="Határidő (opcionális)" Clearable="true" Editable="true" DateFormat="yyyy.MM.dd" />
-        <div class="d-flex gap-4 mt-2">
-            <MudSwitch @bind-Value="_important" Label="Fontos" Color="Color.Primary" />
-            <MudSwitch @bind-Value="_urgent" Label="Sürgős" Color="Color.Error" />
+
+        @* Kártya háttérikonja: „Auto” = a címből kitalált (élőben frissül), vagy kézzel választott. *@
+        <div class="icon-pick-label">
+            Ikon <span>@(_icon is null ? $"· automatikus ({AutoLabel})" : $"· {TaskIcons.ByKey(_icon)?.Label}")</span>
+        </div>
+        <div class="icon-pick" role="radiogroup" aria-label="Ikon">
+            <button type="button" class="@($"icon-opt auto {(_icon is null ? "on" : "")}")" title="Automatikus a cím alapján"
+                    role="radio" aria-checked="@(_icon is null ? "true" : "false")" tabindex="@(_icon is null ? 0 : -1)" aria-label="Automatikus ikon" @onclick="() => _icon = null">
+                <MudIcon Icon="@AutoIcon" /><span class="auto-tag">auto</span>
+            </button>
+            @foreach (var i in TaskIcons.All)
+            {
+                <button type="button" class="@($"icon-opt {(_icon == i.Key ? "on" : "")}")" title="@i.Label"
+                        role="radio" aria-checked="@(_icon == i.Key ? "true" : "false")" tabindex="@(_icon == i.Key ? 0 : -1)" aria-label="@i.Label" @onclick="() => _icon = i.Key">
+                    <MudIcon Icon="@i.Icon" />
+                </button>
+            }
         </div>
         @if (Task?.RecurringTemplateId is not null)
         {
@@ -39,6 +64,11 @@
     private bool _important;
     private bool _urgent;
     private bool _busy;
+    private string? _icon;   // null = automatikus
+
+    private TaskIcon? Guessed => TaskIcons.Guess(_title);
+    private string AutoIcon => Guessed?.Icon ?? Quadrants.Of(_important, _urgent).FlagIcons.Last();
+    private string AutoLabel => Guessed?.Label ?? "a negyed ikonja";
 
     public static async Task<bool> ShowAsync(IDialogService dialogs, TaskDto? task)
     {
@@ -56,6 +86,7 @@
         _due = Format.ToDateTime(Task.DueDate);
         _important = Task.IsImportant;
         _urgent = Task.IsUrgent;
+        _icon = TaskIcons.ByKey(Task.Icon)?.Key;
     }
 
     private async Task Save()
@@ -63,7 +94,7 @@
         _busy = true;
         try
         {
-            var dto = new TaskEditDto(_title!.Trim(), _notes, _important, _urgent, Format.ToDateOnly(_due));
+            var dto = new TaskEditDto(_title!.Trim(), _notes, _important, _urgent, Format.ToDateOnly(_due), _icon);
             if (Task is null) await Api.PostAsync<TaskDto>("api/tasks", dto);
             else await Api.PutAsync<TaskDto>($"api/tasks/{Task.Id}", dto);
             MudDialog.Close(DialogResult.Ok(true));

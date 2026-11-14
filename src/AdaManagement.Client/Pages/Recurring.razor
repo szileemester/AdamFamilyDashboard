@@ -2,74 +2,169 @@
 @inject ApiClient Api
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
-@inject UndoSnackbar Undo
+@inject UndoService Undo
+@implements IDisposable
 
-<PageTitle>Ismétlődő feladatok – Ada</PageTitle>
-<div class="d-flex align-center mb-2">
-    <MudText Typo="Typo.h5">Ismétlődő feladatok</MudText>
-    <MudSpacer />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add">Új</MudButton>
-</div>
+<PageTitle>Ismétlődő feladatok – Adam's family dashboard</PageTitle>
+
+@* a főoldalhoz hasonló kezdőkép (cím, gombok, számok) és plakát-kártyák rácsban. *@
+<section class="hero sub-hero">
+    <div class="hero-content">
+        <div class="hero-kicker">Rendszeres teendők</div>
+        <div class="hero-head">
+            <div class="sub-hero-name">
+                <BackButton />
+                <h1 class="hero-title">Ismétlődő feladatok</h1>
+            </div>
+            <div class="hero-actions">
+                <button type="button" class="hero-btn primary" @onclick="Add"><MudIcon Icon="@Icons.Material.Filled.Add" /> Új</button>
+                @* Visszavonás (kész / törlés): csak akkor látszik, ha van mit visszavonni. *@
+                <UndoButton Hero="true" />
+            </div>
+        </div>
+        @if (_items is { Count: > 0 })
+        {
+            // A szüneteltetett (inaktív) sablonok nem számítanak lejártnak / közelgőnek.
+            var overdue = _items.Count(t => t.IsActive && Days(t) < 0);
+            var soon = _items.Count(t => t.IsActive && Days(t) is >= 0 and <= 30);
+            var next = _items.Where(t => t.IsActive).MinBy(t => t.NextDueDate);
+            <div class="hero-meta">
+                <span class="hero-stat"><b>@_items.Count</b> feladat</span>
+                @if (overdue > 0) { <span class="hero-stat"><b class="overdue">@overdue</b> lejárt</span> }
+                <span class="hero-stat"><b>@soon</b> 30 napon belül</span>
+                @if (next is not null)
+                {
+                    <span class="hero-next">Következő: <b>@next.Title</b> · @Format.Relative(Days(next))</span>
+                }
+            </div>
+        }
+    </div>
+</section>
 
 @if (_items is null)
 {
-    <MudProgressLinear Indeterminate="true" />
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
 else if (_items.Count == 0)
 {
-    <MudText Typo="Typo.body2">Még nincs ismétlődő feladat. Pl. olajcsere 12 havonta, kazán karbantartás évente.</MudText>
+    <div class="sub-empty">Még nincs ismétlődő feladat. Pl. olajcsere 12 havonta, kazán karbantartás évente.</div>
 }
 else
 {
-    @foreach (var t in _items)
-    {
-        var days = t.NextDueDate.DayNumber - _today.DayNumber;
-        <MudPaper Elevation="1" Class="@($"pa-3 mb-2 {(t.IsActive ? "" : "stale")}")">
-            <div class="d-flex align-center gap-2">
-                <div class="flex-grow-1" style="min-width:0">
-                    <MudText Typo="Typo.subtitle1"><b>@t.Title</b> @if (!t.IsActive) { <MudChip T="string" Size="Size.Small">inaktív</MudChip> }</MudText>
-                    <MudText Typo="Typo.body2" Class="@(days < 0 ? "overdue" : "")">
-                        Esedékes: @Format.Date(t.NextDueDate) · @Format.Relative(days)
-                    </MudText>
-                    <MudText Typo="Typo.caption">
-                        @(t.IntervalMonths % 12 == 0 ? $"{t.IntervalMonths / 12} évente" : $"{t.IntervalMonths} havonta") ·
-                        @t.LeadDays nappal előtte jelenik meg
-                    </MudText>
+    <div class="rp-grid">
+        @foreach (var t in _items)
+        {
+            var days = Days(t);
+            var logOpen = _openLogs.Contains(t.Id);
+            var state = !t.IsActive ? "inactive" : days < 0 ? "overdue" : days <= t.LeadDays ? "soon" : "";
+            <article class="@($"rp-card {state}")" style="@($"--hue:{t.Id * 47 % 360}")">
+                <div class="rp-art" aria-hidden="true"></div>
+                <MudIcon Icon="@(TaskIcons.Guess(t.Title)?.Icon ?? Icons.Material.Outlined.EventRepeat)" Class="rp-icon" aria-hidden="true" />
+                @* A kártyára kattintva (vagy Enterrel) nyílik a szerkesztő; a gombok ezt nem váltják ki. *@
+                <div class="rp-main" role="button" tabindex="0" aria-label="@($"{t.Title} szerkesztése")"
+                     @onclick="() => Edit(t)">
+                    <div class="rp-badges">
+                        @if (!t.IsActive) { <span class="m-badge">Inaktív</span> }
+                        else if (days < 0) { <span class="m-badge danger">Lejárt</span> }
+                        else if (days <= t.LeadDays) { <span class="m-badge warn">Hamarosan</span> }
+                    </div>
+                    <div class="rp-title">@t.Title</div>
+                    <div class="rp-when">
+                        <span class="rp-count">@Countdown(days).Big</span>
+                        <span class="rp-count-unit">@Countdown(days).Small</span>
+                    </div>
+                    <div class="rp-meta">
+                        <span><MudIcon Icon="@Icons.Material.Outlined.Event" /> @Format.Date(t.NextDueDate)</span>
+                        <span><MudIcon Icon="@Icons.Material.Outlined.Autorenew" /> @Interval(t)</span>
+                    </div>
+                    <div class="rp-progress" title="@($"Az előző esedékesség óta eltelt idő · {t.LeadDays} nappal előtte kerül a mátrixba")">
+                        <span style="@($"width:{Progress(t, days)}%")"></span>
+                    </div>
                 </div>
-                <MudIconButton Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" title="Elvégezve" OnClick="() => Complete(t)" />
-                <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-                    <MudMenuItem OnClick="() => Edit(t)">Szerkesztés</MudMenuItem>
-                    <MudMenuItem OnClick="() => ToggleLog(t)">Napló</MudMenuItem>
-                    <MudMenuItem OnClick="() => Delete(t)">Törlés</MudMenuItem>
-                </MudMenu>
-            </div>
-            @if (_logs.TryGetValue(t.Id, out var log))
-            {
-                <MudDivider Class="my-2" />
-                @if (log.Count == 0)
-                {
-                    <MudText Typo="Typo.caption">Még nincs bejegyzés.</MudText>
-                }
-                @foreach (var e in log)
-                {
-                    <MudText Typo="Typo.caption" Class="d-block">
-                        <b>@Format.Date(e.CompletedOn)</b> (esedékes: @Format.Date(e.DueDate))@(e.Note is null ? "" : $" – {e.Note}")
-                    </MudText>
-                }
-            }
-        </MudPaper>
-    }
+                <div class="rp-actions">
+                    <button type="button" class="m-btn wide primary" title="Elvégezve" @onclick="() => Complete(t)">
+                        <MudIcon Icon="@Icons.Material.Filled.Check" /><span>Kész</span>
+                    </button>
+                    <button type="button" class="@($"m-btn {(logOpen ? "active" : "")}")" title="Napló" aria-label="Napló"
+                            aria-pressed="@(logOpen ? "true" : "false")" @onclick="() => ToggleLog(t)">
+                        <MudIcon Icon="@Icons.Material.Outlined.History" />
+                    </button>
+                    <button type="button" class="m-btn rp-delete" title="Törlés" aria-label="Törlés" @onclick="() => Delete(t)">
+                        <MudIcon Icon="@Icons.Material.Outlined.Delete" />
+                    </button>
+                </div>
+                @LogPanel(t)
+            </article>
+        }
+    </div>
 }
 
 @code {
     private List<TemplateDto>? _items;
-    private readonly Dictionary<int, List<CompletionLogDto>> _logs = [];
-    private DateOnly _today = DateOnly.FromDateTime(DateTime.Today);
+    private readonly Dictionary<int, List<CompletionLogDto>> _logs = [];   // betöltött naplók
+    private readonly HashSet<int> _openLogs = [];                          // épp nyitott naplók
+    private DateOnly _today = Format.Today;
 
-    protected override Task OnInitializedAsync() => Load();
+    private int Days(TemplateDto t) => t.NextDueDate.DayNumber - _today.DayNumber;
+
+    private static string Interval(TemplateDto t) =>
+        t.IntervalMonths % 12 == 0 ? $"{t.IntervalMonths / 12} évente" : $"{t.IntervalMonths} havonta";
+
+    /// <summary>Nagy visszaszámláló a kártyán: szám + egység (ma / holnap szövegként).</summary>
+    private static (string Big, string Small) Countdown(int days) => days switch
+    {
+        0 => ("Ma", "esedékes"),
+        1 => ("Holnap", "esedékes"),
+        -1 => ("Tegnap", "lejárt"),
+        > 1 => (days.ToString(), "nap múlva"),
+        _ => ((-days).ToString(), "napja lejárt"),
+    };
+
+    /// <summary>Az előző esedékesség (következő − N hónap) óta eltelt idő aránya, százalékban.</summary>
+    private string Progress(TemplateDto t, int days)
+    {
+        var prev = t.NextDueDate.AddMonths(-t.IntervalMonths);
+        var total = Math.Max(1, t.NextDueDate.DayNumber - prev.DayNumber);
+        var pct = days < 0 ? 100 : Math.Clamp((total - days) * 100.0 / total, 2, 100);
+        return pct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    // Napló: lenyíló animációval (betöltés után a tartalom megmarad, csak összecsukódik).
+    private RenderFragment LogPanel(TemplateDto t) => __builder =>
+    {
+        if (!_logs.TryGetValue(t.Id, out var log)) return;
+        var open = _openLogs.Contains(t.Id);
+        <div class="@($"rec-log {(open ? "open" : "")}")" aria-hidden="@(open ? "false" : "true")">
+            <div class="rec-log-inner">
+                <div class="rec-log-body">
+                    <div class="rec-log-title">Napló</div>
+                    @if (log.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption">Még nincs bejegyzés.</MudText>
+                    }
+                    @foreach (var e in log)
+                    {
+                        <div class="rec-log-entry">
+                            <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success" />
+                            <MudText Typo="Typo.caption">
+                                <b>@Format.Date(e.CompletedOn)</b> (esedékes: @Format.Date(e.DueDate))@(e.Note is null ? "" : $" – {e.Note}")
+                            </MudText>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    };
+
+    protected override Task OnInitializedAsync()
+    {
+        Undo.Undone += OnUndone;
+        return Load();
+    }
 
     private async Task Load()
     {
+        _today = Format.Today;
         try { _items = await Api.GetAsync<List<TemplateDto>>("api/templates"); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items ??= []; }
     }
@@ -87,28 +182,60 @@ else
     private async Task Complete(TemplateDto t)
     {
         if (!await CompleteOccurrenceDialog.ShowAsync(Dialogs, t, _today)) return;
-        _logs.Remove(t.Id);
         await Load();
-        Undo.Show($"Kész: {t.Title}", () => Api.PostAsync<TemplateDto>($"api/templates/{t.Id}/undo-last"), async () =>
+        await ReloadLogs();
+        Undo.Push($"Kész: {t.Title}", () => Api.PostAsync<TemplateDto>($"api/templates/{t.Id}/undo-last"));
+    }
+
+    // Visszavonás után újratölt (a nyitott naplók is frissülnek).
+    private async Task OnUndone()
+    {
+        await Load();
+        await ReloadLogs();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>A nyitott naplókat újra lekéri, a csukottakat eldobja (következő nyitáskor töltődnek).</summary>
+    private async Task ReloadLogs()
+    {
+        foreach (var id in _logs.Keys.Where(id => !_openLogs.Contains(id)).ToList()) _logs.Remove(id);
+        foreach (var id in _openLogs.ToList())
         {
-            _logs.Remove(t.Id);
-            await Load();
-            StateHasChanged();
-        });
+            try { _logs[id] = await Api.GetAsync<List<CompletionLogDto>>($"api/templates/{id}/log"); }
+            catch { _openLogs.Remove(id); _logs.Remove(id); }
+        }
+    }
+
+    public void Dispose()
+    {
+        Undo.Undone -= OnUndone;
     }
 
     private async Task ToggleLog(TemplateDto t)
     {
-        if (_logs.Remove(t.Id)) return;
-        try { _logs[t.Id] = await Api.GetAsync<List<CompletionLogDto>>($"api/templates/{t.Id}/log"); }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        if (_openLogs.Remove(t.Id)) return;   // összecsukás: a tartalom marad, a CSS animálja
+        if (!_logs.ContainsKey(t.Id))
+        {
+            try { _logs[t.Id] = await Api.GetAsync<List<CompletionLogDto>>($"api/templates/{t.Id}/log"); }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); return; }
+            // Először csukott állapotban kerül a lapra, majd egy képkocka múlva nyílik – így a lenyílás is animált.
+            StateHasChanged();
+            await Task.Delay(30);
+        }
+        _openLogs.Add(t.Id);
     }
 
+    // Megerősítő ablak helyett azonnal töröl; a Visszavonás gomb visszahozza (naplóval együtt).
     private async Task Delete(TemplateDto t)
     {
-        if (await Dialogs.ShowMessageBoxAsync("Törlés", $"Törlöd: „{t.Title}”? A napló is törlődik, a már létrehozott feladatok megmaradnak.",
-                yesText: "Törlés", cancelText: "Mégse") != true) return;
-        try { await Api.DeleteAsync($"api/templates/{t.Id}"); await Load(); }
+        try
+        {
+            await Api.DeleteAsync($"api/templates/{t.Id}");
+            _logs.Remove(t.Id);
+            _openLogs.Remove(t.Id);
+            await Load();
+            Undo.Push($"Törölve: {t.Title}", () => Api.PostAsync<TemplateDto>($"api/templates/{t.Id}/restore"));
+        }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 }

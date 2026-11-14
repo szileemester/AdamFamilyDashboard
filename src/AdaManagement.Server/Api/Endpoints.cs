@@ -30,11 +30,15 @@ public static class Endpoints
 
     private static async Task<DashboardDto> GetDashboard(AppDbContext db, AppClock clock, CancellationToken ct)
     {
+        await PurgeDeletedTemplatesAsync(db, clock, ct);
         await GenerateOccurrencesAsync(db, clock, ct);
         var today = clock.Today;
         var settings = await db.Settings.SingleAsync(ct);
 
-        var open = await db.Tasks.Where(t => t.CompletedAt == null)
+        // A törölt (még visszaállítható) sablonok nyitott alkalmai nem látszanak; visszaállításkor újra előjönnek.
+        var deletedTemplateIds = db.RecurringTemplates.IgnoreQueryFilters().Where(t => t.DeletedAt != null).Select(t => t.Id);
+        var open = await db.Tasks
+            .Where(t => t.CompletedAt == null && (t.RecurringTemplateId == null || !deletedTemplateIds.Contains(t.RecurringTemplateId.Value)))
             .OrderBy(t => t.DueDate == null).ThenBy(t => t.DueDate).ThenBy(t => t.CreatedAt)
             .ToListAsync(ct);
 
@@ -54,16 +58,22 @@ public static class Endpoints
 
     public static async Task GenerateOccurrencesAsync(AppDbContext db, AppClock clock, CancellationToken ct)
     {
-        var templates = await db.RecurringTemplates.Where(t => t.IsActive).ToListAsync(ct);
+        var today = clock.Today;
+        var templates = (await db.RecurringTemplates.Where(t => t.IsActive).ToListAsync(ct))
+            .Where(t => t.NextDueDate.AddDays(-t.LeadDays) <= today)
+            .ToList();
         if (templates.Count == 0) return;
 
+        // Csak az érintett sablonok mostani (vagy későbbi) alkalmai számítanak – nem kell az összes régi feladat.
+        var ids = templates.Select(t => t.Id).ToList();
+        var minDue = templates.Min(t => t.NextDueDate);
         var existing = (await db.Tasks
-                .Where(t => t.RecurringTemplateId != null && t.OccurrenceDate != null)
+                .Where(t => t.RecurringTemplateId != null && ids.Contains(t.RecurringTemplateId.Value) && t.OccurrenceDate >= minDue)
                 .Select(t => new { t.RecurringTemplateId, t.OccurrenceDate })
                 .ToListAsync(ct))
             .Select(x => (x.RecurringTemplateId!.Value, x.OccurrenceDate!.Value));
 
-        var toCreate = OccurrenceGenerator.TasksToCreate(clock.Today, clock.UtcNow, templates, existing);
+        var toCreate = OccurrenceGenerator.TasksToCreate(today, clock.UtcNow, templates, existing);
         if (toCreate.Count == 0) return;
 
         db.Tasks.AddRange(toCreate);
@@ -77,6 +87,39 @@ public static class Endpoints
             foreach (var t in toCreate) db.Entry(t).State = EntityState.Detached;
         }
     }
+
+    /// <summary>
+    /// Az egy napnál régebben törölt sablonok végleges eltávolítása (a napló velük törlődik). A nyitott, még el nem
+    /// végzett alkalmaik is mennek; a kész feladatok sablon nélkül megmaradnak a Kész listában.
+    /// </summary>
+    private static async Task PurgeDeletedTemplatesAsync(AppDbContext db, AppClock clock, CancellationToken ct)
+    {
+        var cutoff = clock.UtcNow.AddDays(-1);
+        var ids = await db.RecurringTemplates.IgnoreQueryFilters().Where(x => x.DeletedAt < cutoff).Select(x => x.Id).ToListAsync(ct);
+        if (ids.Count == 0) return;
+        await db.Tasks.Where(t => t.CompletedAt == null && t.RecurringTemplateId != null && ids.Contains(t.RecurringTemplateId.Value))
+            .ExecuteDeleteAsync(ct);
+        await db.RecurringTemplates.IgnoreQueryFilters().Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>
+    /// Egy ismétlődő teljesítés visszavonása: a sablon ütemezése visszaáll, a naplóbejegyzés törlődik, az alkalom
+    /// feladata újra nyitott. Ha közben már a következő alkalom is legenerálódott (nyitott feladat), az felesleges lesz.
+    /// </summary>
+    private static async Task UndoCompletionAsync(AppDbContext db, RecurringTemplate t, CompletionLogEntry entry, CancellationToken ct)
+    {
+        var newer = await db.Tasks.Where(x => x.RecurringTemplateId == t.Id && x.OccurrenceDate == t.NextDueDate && x.CompletedAt == null).ToListAsync(ct);
+        db.Tasks.RemoveRange(newer);
+
+        t.Restore(entry);
+        var task = await db.Tasks.FirstOrDefaultAsync(x => x.RecurringTemplateId == t.Id && x.OccurrenceDate == entry.DueDate, ct);
+        if (task is not null) task.CompletedAt = null;
+
+        db.CompletionLog.Remove(entry);
+    }
+
+    private static Task<CompletionLogEntry?> LastLogEntryAsync(AppDbContext db, int templateId, CancellationToken ct) =>
+        db.CompletionLog.Where(e => e.RecurringTemplateId == templateId).OrderByDescending(e => e.Id).FirstOrDefaultAsync(ct);
 
     // ---------- Feladatok ----------
 
@@ -96,7 +139,7 @@ public static class Endpoints
             var task = new TaskItem
             {
                 Title = dto.Title.Trim(), Notes = dto.Notes.Clean(), IsImportant = dto.IsImportant, IsUrgent = dto.IsUrgent,
-                DueDate = dto.DueDate, CreatedAt = clock.UtcNow,
+                DueDate = dto.DueDate, Icon = dto.Icon.Clean(), CreatedAt = clock.UtcNow,
             };
             db.Tasks.Add(task);
             await db.SaveChangesAsync(ct);
@@ -113,6 +156,7 @@ public static class Endpoints
             task.IsImportant = dto.IsImportant;
             task.IsUrgent = dto.IsUrgent;
             task.DueDate = dto.DueDate;
+            task.Icon = dto.Icon.Clean();
             await db.SaveChangesAsync(ct);
             return Results.Ok(task.ToDto());
         });
@@ -132,10 +176,16 @@ public static class Endpoints
             return Results.Ok(task.ToDto());
         });
 
+        // Visszanyitás (a „Kész” visszavonása is ez). Generált feladatnál, ha ez volt a sablon utolsó teljesítése,
+        // a sablon ütemezése is visszaáll – különben a sablon már a következő alkalomnál tartana.
         g.MapPost("/{id:int}/reopen", async (int id, AppDbContext db, CancellationToken ct) =>
         {
-            var task = await db.Tasks.FindAsync([id], ct);
+            var task = await db.Tasks.Include(t => t.RecurringTemplate).SingleOrDefaultAsync(t => t.Id == id, ct);
             if (task is null) return Results.NotFound();
+            if (task.IsOpen) return Results.Ok(task.ToDto());
+            if (task.RecurringTemplate is { } template &&
+                await LastLogEntryAsync(db, template.Id, ct) is { } last && last.DueDate == task.OccurrenceDate)
+                await UndoCompletionAsync(db, template, last, ct);
             task.CompletedAt = null;
             await db.SaveChangesAsync(ct);
             return Results.Ok(task.ToDto());
@@ -178,40 +228,68 @@ public static class Endpoints
             return Results.Ok(t.ToDto());
         });
 
-        g.MapPut("/{id:int}", async (int id, TemplateEditDto dto, AppDbContext db, CancellationToken ct) =>
+        g.MapPut("/{id:int}", async (int id, TemplateEditDto dto, AppDbContext db, AppClock clock, CancellationToken ct) =>
         {
             if (Validate.Template(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
             var t = await db.RecurringTemplates.FindAsync([id], ct);
             if (t is null) return Results.NotFound();
 
-            var scheduleChanged = t.NextDueDate != dto.NextDueDate || t.IntervalMonths != dto.IntervalMonths;
             var oldDue = t.NextDueDate;
+            var dateChanged = oldDue != dto.NextDueDate;
+            // Erre a napra már volt (pl. teljesített) alkalom: az egyedi index miatt nem lehet még egy.
+            if (dateChanged && await db.Tasks.AnyAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == dto.NextDueDate, ct))
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                    { ["NextDueDate"] = ["Erre a napra már van egy alkalom ennél a feladatnál. Válassz másik dátumot."] });
+
             t.Title = dto.Title.Trim();
             t.Notes = dto.Notes.Clean();
-            t.IntervalMonths = dto.IntervalMonths;
             t.LeadDays = dto.LeadDays;
             t.IsActive = dto.IsActive;
-            if (scheduleChanged) t.Reschedule(dto.NextDueDate);
+            if (dateChanged)
+            {
+                t.IntervalMonths = dto.IntervalMonths;
+                t.Reschedule(dto.NextDueDate);
+            }
+            else if (t.IntervalMonths != dto.IntervalMonths)
+                t.ChangeInterval(dto.IntervalMonths); // a hónap napja (pl. 31.) megmarad
 
-            // A már legenerált, nyitott feladat kövesse az új esedékességet.
+            // A már legenerált, nyitott feladat kövesse az új esedékességet; ha az új dátum még messze van, kikerül
+            // a mátrixból (időben újra bekerül).
             var openTask = await db.Tasks.SingleOrDefaultAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == oldDue && x.CompletedAt == null, ct);
             if (openTask is not null)
             {
-                openTask.Title = t.Title;
-                if (scheduleChanged) { openTask.OccurrenceDate = t.NextDueDate; openTask.DueDate = t.NextDueDate; }
+                if (dateChanged && t.NextDueDate.AddDays(-t.LeadDays) > clock.Today)
+                    db.Tasks.Remove(openTask);
+                else
+                {
+                    openTask.Title = t.Title;
+                    if (dateChanged) { openTask.OccurrenceDate = t.NextDueDate; openTask.DueDate = t.NextDueDate; }
+                }
             }
 
             await db.SaveChangesAsync(ct);
             return Results.Ok(t.ToDto());
         });
 
-        g.MapDelete("/{id:int}", async (int id, AppDbContext db, CancellationToken ct) =>
+        // Törlés: először csak megjelöli (a Visszavonás gomb visszaállíthatja), a nyitott alkalma addig rejtve marad.
+        // Az egy napnál régebben törölteket véglegesen eltávolítja (ugyanígy a dashboard lekérésekor is).
+        g.MapDelete("/{id:int}", async (int id, AppDbContext db, AppClock clock, CancellationToken ct) =>
         {
             var t = await db.RecurringTemplates.FindAsync([id], ct);
             if (t is null) return Results.NotFound();
-            db.RecurringTemplates.Remove(t); // a napló vele törlődik, a generált feladatok megmaradnak sablon nélkül
+            t.DeletedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);
+            await PurgeDeletedTemplatesAsync(db, clock, ct);
             return Results.NoContent();
+        });
+
+        g.MapPost("/{id:int}/restore", async (int id, AppDbContext db, CancellationToken ct) =>
+        {
+            var t = await db.RecurringTemplates.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (t is null) return Results.NotFound();
+            t.DeletedAt = null;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(t.ToDto());
         });
 
         g.MapGet("/{id:int}/log", async (int id, AppDbContext db, CancellationToken ct) =>
@@ -221,10 +299,14 @@ public static class Endpoints
         // Az aktuális alkalom teljesítése párbeszédablakból: dátum, megjegyzés, felajánlott/átírt következő esedékesség.
         g.MapPost("/{id:int}/complete", async (int id, CompleteOccurrenceDto dto, AppDbContext db, AppClock clock, CancellationToken ct) =>
         {
+            if (Validate.Completion(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
             var t = await db.RecurringTemplates.FindAsync([id], ct);
             if (t is null) return Results.NotFound();
             if (dto.NextDueDate <= t.NextDueDate)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["NextDueDate"] = ["A következő esedékesség legyen későbbi a mostaninál."] });
+            if (await db.Tasks.AnyAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == dto.NextDueDate, ct))
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                    { ["NextDueDate"] = ["Erre a napra már van egy alkalom ennél a feladatnál. Válassz másik dátumot."] });
 
             var due = t.NextDueDate;
             var openTask = await db.Tasks.SingleOrDefaultAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == due && x.CompletedAt == null, ct);
@@ -240,18 +322,8 @@ public static class Endpoints
         {
             var t = await db.RecurringTemplates.FindAsync([id], ct);
             if (t is null) return Results.NotFound();
-            var entry = await db.CompletionLog.Where(e => e.RecurringTemplateId == id).OrderByDescending(e => e.Id).FirstOrDefaultAsync(ct);
-            if (entry is null) return Results.Conflict();
-
-            // Ha közben már a következő alkalom is legenerálódott (nyitott feladat), az felesleges lesz.
-            var newer = await db.Tasks.Where(x => x.RecurringTemplateId == id && x.OccurrenceDate == t.NextDueDate && x.CompletedAt == null).ToListAsync(ct);
-            db.Tasks.RemoveRange(newer);
-
-            t.Restore(entry);
-            var task = await db.Tasks.FirstOrDefaultAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == entry.DueDate, ct);
-            if (task is not null) task.CompletedAt = null;
-
-            db.CompletionLog.Remove(entry);
+            if (await LastLogEntryAsync(db, id, ct) is not { } entry) return Results.Conflict();
+            await UndoCompletionAsync(db, t, entry, ct);
             await db.SaveChangesAsync(ct);
             return Results.Ok(t.ToDto());
         });
@@ -264,18 +336,18 @@ public static class Endpoints
         g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
             (await db.Birthdays.OrderBy(b => b.Month).ThenBy(b => b.Day).ThenBy(b => b.Name).ToListAsync(ct)).Select(b => b.ToDto()));
 
-        g.MapPost("/", async (BirthdayEditDto dto, AppDbContext db, CancellationToken ct) =>
+        g.MapPost("/", async (BirthdayEditDto dto, AppDbContext db, AppClock clock, CancellationToken ct) =>
         {
-            if (Validate.Birthday(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            if (Validate.Birthday(dto, clock.Today) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
             var b = new Birthday { Name = dto.Name.Trim(), Month = dto.Month, Day = dto.Day, Year = dto.Year, Notes = dto.Notes.Clean() };
             db.Birthdays.Add(b);
             await db.SaveChangesAsync(ct);
             return Results.Ok(b.ToDto());
         });
 
-        g.MapPut("/{id:int}", async (int id, BirthdayEditDto dto, AppDbContext db, CancellationToken ct) =>
+        g.MapPut("/{id:int}", async (int id, BirthdayEditDto dto, AppDbContext db, AppClock clock, CancellationToken ct) =>
         {
-            if (Validate.Birthday(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            if (Validate.Birthday(dto, clock.Today) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
             var b = await db.Birthdays.FindAsync([id], ct);
             if (b is null) return Results.NotFound();
             b.Name = dto.Name.Trim();
@@ -294,26 +366,6 @@ public static class Endpoints
             db.Birthdays.Remove(b);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
-        });
-
-        // Egyszeri import: CSV vagy vCard szöveg. A már meglévő (név + hó + nap) párosokat kihagyja.
-        g.MapPost("/import", async (ImportRequestDto dto, AppDbContext db, CancellationToken ct) =>
-        {
-            if (dto.Content.Length > 1_000_000) return Results.BadRequest("Túl nagy fájl.");
-            var (items, skipped) = BirthdayImportParser.Parse(dto.Content);
-            var existing = (await db.Birthdays.Select(b => new { b.Name, b.Month, b.Day }).ToListAsync(ct))
-                .Select(b => (b.Name.ToLowerInvariant(), b.Month, b.Day)).ToHashSet();
-
-            var imported = 0;
-            foreach (var p in items)
-            {
-                var name = p.Name.Length > 200 ? p.Name[..200] : p.Name;
-                if (!existing.Add((name.ToLowerInvariant(), p.Month, p.Day))) { skipped++; continue; }
-                db.Birthdays.Add(new Birthday { Name = name, Month = p.Month, Day = p.Day, Year = p.Year });
-                imported++;
-            }
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new ImportResultDto(imported, skipped));
         });
     }
 

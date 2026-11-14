@@ -21,6 +21,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(x => x.Title).HasMaxLength(200);
             e.Property(x => x.Notes).HasMaxLength(2000);
+            e.Property(x => x.Icon).HasMaxLength(40);
             e.HasOne(x => x.RecurringTemplate).WithMany().HasForeignKey(x => x.RecurringTemplateId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => new { x.RecurringTemplateId, x.OccurrenceDate })
                 .IsUnique()
@@ -33,6 +34,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Title).HasMaxLength(200);
             e.Property(x => x.Notes).HasMaxLength(2000);
             e.HasMany(x => x.Log).WithOne().HasForeignKey(x => x.RecurringTemplateId).OnDelete(DeleteBehavior.Cascade);
+            // A törölt (visszaállítható) sablonok minden lekérdezésből kimaradnak.
+            e.HasQueryFilter(x => x.DeletedAt == null);
         });
 
         b.Entity<CompletionLogEntry>().Property(x => x.Note).HasMaxLength(1000);

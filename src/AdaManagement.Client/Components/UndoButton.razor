@@ -1,0 +1,31 @@
+@* Visszavonás ikon: csak akkor látszik, ha van mit visszavonni (UndoService). Tooltipben a legutóbbi művelet. *@
+@implements IDisposable
+@inject UndoService Undo
+
+@if (Undo.CanUndo)
+{
+    var label = $"Visszavonás – {Undo.LastLabel}";
+    @if (Hero)
+    {
+        <button type="button" class="hero-btn hero-btn-icon undo-btn" title="@label" aria-label="@label" @onclick="Undo.UndoLastAsync">
+            <MudIcon Icon="@Icons.Material.Filled.Undo" />
+        </button>
+    }
+    else
+    {
+        <MudTooltip Text="@label">
+            <MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Inherit" Class="undo-btn" aria-label="@label" OnClick="Undo.UndoLastAsync" />
+        </MudTooltip>
+    }
+}
+
+@code {
+    /// <summary>Mozi kezdőkép gombstílusa (az „Ismétlődők” mellett); egyébként fejléc-ikon.</summary>
+    [Parameter] public bool Hero { get; set; }
+
+    protected override void OnInitialized() => Undo.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Undo.Changed -= OnChanged;
+}

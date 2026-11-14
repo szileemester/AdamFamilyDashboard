@@ -1,132 +1,44 @@
-@* Eisenhower mátrix. Telefonon a téma dönti el a nézetet (lista / bento csempék / fülek), desktopon 2×2 rács drag & droppal. *@
+@* Eisenhower mátrix: 2×2 panel kártyákkal (telefonon függőleges mini-kártyák). *@
 @implements IDisposable
 @inject ApiClient Api
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
-@inject UndoSnackbar Undo
-@inject ThemeService Themes
+@inject UndoService Undo
+@inject IJSRuntime JS
 
-@* ---------- Gyors felvétel ---------- *@
-<MudPaper Class="pa-2 mb-3" Elevation="0" Outlined="true">
-    <div class="d-flex align-center gap-2">
-        <MudTextField @bind-Value="_newTitle" Placeholder="@Placeholder" Variant="Variant.Text" Disabled="ReadOnly"
-                      Immediate="true" OnKeyDown="OnQuickAddKey" Class="flex-grow-1 mt-0" />
-        <button type="button" class="@($"flag-chip {(_newImportant ? "on-important" : "")}")" disabled="@ReadOnly"
-                @onclick="() => _newImportant = !_newImportant" aria-pressed="@_newImportant">
-            <MudIcon Icon="@(_newImportant ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarOutline)" /> Fontos
-        </button>
-        <button type="button" class="@($"flag-chip {(_newUrgent ? "on-urgent" : "")}")" disabled="@ReadOnly"
-                @onclick="() => _newUrgent = !_newUrgent" aria-pressed="@_newUrgent">
-            <MudIcon Icon="@(_newUrgent ? Icons.Material.Filled.Bolt : Icons.Material.Outlined.Bolt)" /> Sürgős
-        </button>
-        <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small"
-                       Disabled="ReadOnly || string.IsNullOrWhiteSpace(_newTitle)" OnClick="QuickAdd" aria-label="Hozzáadás" />
-    </div>
-</MudPaper>
-
-@* ---------- Telefon ---------- *@
-<MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
-    @switch (Themes.Current.Layout)
-    {
-        case MatrixLayout.Bento:
-            <MudGrid Spacing="2">
-                @foreach (var q in Quadrants.All)
-                {
-                    var items = ItemsOf(q);
-                    var expanded = _expanded == q.Id;
-                    <MudItem xs="@(expanded ? 12 : 6)">
-                        <div class="@($"tile tile-{q.Id}")">
-                            <QuadrantHeader Quadrant="q" Count="items.Count" BigCount="true" Short="!expanded" />
-                            @foreach (var t in expanded ? items : items.Take(2))
-                            {
-                                <TaskRow @key="t.Id" Task="t" Today="Today" ReadOnly="ReadOnly" Compact="!expanded"
-                                         OnComplete="Complete" OnEdit="Edit" OnFlags="SetFlags" />
-                            }
-                            @if (items.Count > 2 || expanded)
-                            {
-                                <div class="tile-more" @onclick="() => _expanded = expanded ? null : q.Id">
-                                    @(expanded ? "Kevesebb" : $"+{items.Count - 2} további")
-                                </div>
-                            }
-                            @if (items.Count == 0)
-                            {
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">Üres</MudText>
-                            }
-                        </div>
-                    </MudItem>
-                }
-            </MudGrid>
-            break;
-
-        case MatrixLayout.Fulek:
-            <div class="q-tabs" role="tablist">
-                @foreach (var q in Quadrants.All)
-                {
-                    var active = _tab == q.Id;
-                    <button type="button" role="tab" aria-selected="@active" class="@($"q-tab {(active ? "active" : "")}")" style="@(active ? $"color:var(--{q.Id})" : null)"
-                            @onclick="() => SelectTab(q)">
-                        <span>@foreach (var icon in q.FlagIcons) { <MudIcon Icon="@icon" /> }</span>
-                        <span>@q.ShortTitle · @ItemsOf(q).Count</span>
-                    </button>
-                }
-            </div>
-            var tabQ = Quadrants.ById(_tab);
-            var tabItems = ItemsOf(tabQ);
-            <MudPaper Class="pa-2" Elevation="0">
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">@tabQ.Title – @tabQ.Subtitle.ToLowerInvariant()</MudText>
-                @foreach (var t in tabItems)
-                {
-                    <TaskRow @key="t.Id" Task="t" Today="Today" ReadOnly="ReadOnly" OnComplete="Complete" OnEdit="Edit" OnFlags="SetFlags" />
-                }
-                @if (tabItems.Count == 0)
-                {
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary py-2">Ebben a negyedben nincs feladat.</MudText>
-                }
-            </MudPaper>
-            break;
-
-        default:
+    @* ---------- 2×2 panel kártyákkal. Egérrel natív drag & drop (MudBlazor); érintőképernyőn a natív húzás
+         ki van kapcsolva (ott görgetni kell tudni a kártyákon), helyette interactions.js hosszú nyomásos húzása hívja a MoveTo-t. ---------- *@
+    <MudDropContainer T="TaskDto" @ref="_drop" Items="Tasks" ItemsSelector="@((t, zone) => Quadrants.Of(t.IsImportant, t.IsUrgent).Id == zone)"
+                      ItemDropped="OnDropped" ItemDisabled="@(_ => ReadOnly || _touch)">
+        <ChildContent>
+            <div class="m-grid">
             @foreach (var q in Quadrants.All)
             {
-                var items = ItemsOf(q);
-                <div class="q-section">
-                    <QuadrantHeader Quadrant="q" Count="items.Count" />
-                    @foreach (var t in items)
-                    {
-                        <TaskRow @key="t.Id" Task="t" Today="Today" ReadOnly="ReadOnly" OnComplete="Complete" OnEdit="Edit" OnFlags="SetFlags" />
-                    }
-                    @if (items.Count == 0)
-                    {
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Üres</MudText>
-                    }
-                </div>
-            }
-            break;
-    }
-</MudHidden>
-
-@* ---------- Desktop: 2×2 rács drag & droppal ---------- *@
-<MudHidden Breakpoint="Breakpoint.SmAndDown">
-    <MudDropContainer T="TaskDto" @ref="_drop" Items="Tasks" ItemsSelector="@((t, zone) => Quadrants.Of(t.IsImportant, t.IsUrgent).Id == zone)"
-                      ItemDropped="OnDropped" ItemDisabled="@(_ => ReadOnly)">
-        <ChildContent>
-            <MudGrid Spacing="2">
-                @foreach (var q in Quadrants.All)
-                {
-                    <MudItem xs="6">
-                        <div class="@(Themes.Current.Layout == MatrixLayout.Bento ? $"tile quadrant tile-{q.Id}" : $"mud-paper pa-2 quadrant {q.CssClass}")">
-                            <QuadrantHeader Quadrant="q" Count="ItemsOf(q).Count" ShowSubtitle="true" />
-                            <MudDropZone T="TaskDto" Identifier="@q.Id" Class="flex-grow-1" />
+                var count = ItemsOf(q).Count;
+                <section class="@($"m-quad m-card-{q.Id}")" data-quad="@q.Id">
+                    <div class="m-row-head">
+                        <div class="@($"q-head {q.ColorClass}")">
+                            @foreach (var icon in q.FlagIcons) { <MudIcon Icon="@icon" /> }
+                            <span class="t-full">@q.Title</span><span class="t-short">@q.ShortTitle</span>
+                            <span class="m-count">@count</span>
                         </div>
-                    </MudItem>
-                }
-            </MudGrid>
+                        <span class="m-row-sub">@q.Subtitle</span>
+                    </div>
+                    <div class="m-row-body">
+                        <MudDropZone T="TaskDto" Identifier="@q.Id" Class="m-track" />
+                        @if (count == 0)
+                        {
+                            <div class="m-empty">Üres</div>
+                        }
+                    </div>
+                </section>
+            }
+            </div>
         </ChildContent>
         <ItemRenderer>
-            <TaskRow Task="context" Today="Today" ReadOnly="ReadOnly" OnComplete="Complete" OnEdit="Edit" OnFlags="SetFlags" />
+            <TaskCard Task="context" Today="Today" ReadOnly="ReadOnly" OnComplete="Complete" OnEdit="Edit" />
         </ItemRenderer>
     </MudDropContainer>
-</MudHidden>
 
 @code {
     [Parameter, EditorRequired] public List<TaskDto> Tasks { get; set; } = [];
@@ -137,44 +49,35 @@
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private MudDropContainer<TaskDto>? _drop;
-    private string? _newTitle;
-    private bool _newImportant;
-    private bool _newUrgent;
-    private string? _expanded;   // bento: kinyitott csempe
-    private string _tab = "q1";  // fülek: kiválasztott negyed
+    private DotNetObjectReference<Matrix>? _self;
+    private bool _touch;         // érintőképernyő: saját (JS) húzás a natív helyett
     private bool _needsRefresh = true;
-
-    private string Placeholder => Themes.Current.Layout == MatrixLayout.Fulek
-        ? $"Új feladat → {Quadrants.Of(_newImportant, _newUrgent).ShortTitle}"
-        : "Új feladat…";
 
     private List<TaskDto> ItemsOf(QuadrantInfo q) => Tasks.Where(t => t.IsImportant == q.Important && t.IsUrgent == q.Urgent).ToList();
 
-    protected override void OnInitialized()
+    public void Dispose()
     {
-        Themes.Changed += OnThemeChanged;
-        SyncTabFlags();
+        if (_self is null) return;
+        _ = JS.InvokeVoidAsync("adaDnd.unregister", _self).AsTask().ContinueWith(_ => _self.Dispose());
     }
-
-    private void OnThemeChanged()
-    {
-        _needsRefresh = true;
-        SyncTabFlags();
-        InvokeAsync(StateHasChanged);
-    }
-
-    /// <summary>Füles nézetben a gyors felvétel jelölései a kiválasztott fülét követik.</summary>
-    private void SyncTabFlags()
-    {
-        if (Themes.Current.Layout == MatrixLayout.Fulek) SelectTab(Quadrants.ById(_tab));
-    }
-
-    public void Dispose() => Themes.Changed -= OnThemeChanged;
 
     protected override void OnParametersSet() => _needsRefresh = true;
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            // Érintős húzás bekötése; érintőképernyőn (coarse pointer) a natív húzás kikapcsol.
+            _self = DotNetObjectReference.Create(this);
+            _touch = await JS.InvokeAsync<bool>("adaDnd.register", _self);
+            if (_touch)
+            {
+                _needsRefresh = true;
+                StateHasChanged();
+                return;
+            }
+        }
+
         // A drop container csak a zónák regisztrációja után tudja szétosztani az elemeket (MudHidden miatt később jön létre).
         if (_needsRefresh && _drop is not null)
         {
@@ -183,25 +86,15 @@
         }
     }
 
-    /// <summary>Fül váltásakor a gyors felvétel is abba a negyedbe tesz.</summary>
-    private void SelectTab(QuadrantInfo q)
+    /// <summary>Érintős húzás vége (interactions.js): a feladat átkerül a cél negyedbe.</summary>
+    [JSInvokable]
+    public async Task MoveTo(int taskId, string quadrantId)
     {
-        _tab = q.Id;
-        _newImportant = q.Important;
-        _newUrgent = q.Urgent;
-    }
-
-    private async Task OnQuickAddKey(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter") await QuickAdd();
-    }
-
-    private async Task QuickAdd()
-    {
-        if (ReadOnly || string.IsNullOrWhiteSpace(_newTitle)) return;
-        if (!await Run(() => Api.PostAsync<TaskDto>("api/tasks", new TaskEditDto(_newTitle.Trim(), null, _newImportant, _newUrgent, null)))) return;
-        _newTitle = null;
-        if (Themes.Current.Layout != MatrixLayout.Fulek) _newImportant = _newUrgent = false; // füleknél marad az aktuális negyed
+        var task = Tasks.FirstOrDefault(t => t.Id == taskId);
+        if (task is null || ReadOnly) return;
+        var q = Quadrants.ById(quadrantId);
+        if (q.Important == task.IsImportant && q.Urgent == task.IsUrgent) return;
+        await SetFlags((task, q.Important, q.Urgent));
     }
 
     private async Task Complete(TaskDto task)
@@ -209,18 +102,23 @@
         if (task.RecurringTemplateId is { } templateId)
         {
             // Generált feladat: teljesítés párbeszédablakkal (dátum, megjegyzés, következő esedékesség).
-            var template = await TryGet(() => Api.GetAsync<TemplateDto>($"api/templates/{templateId}"));
+            // Ha a sablon nem kérhető le (pl. hálózati hiba), nem megy tovább sima „Kész”-ként, mert az a sablont is léptetné.
+            // Ha a sablon már nincs meg (404) vagy már egy másik alkalomnál tart, ez sima feladatként zárul.
+            TemplateDto? template;
+            try { template = await Api.GetAsync<TemplateDto>($"api/templates/{templateId}"); }
+            catch (ApiException ex) when (ex.StatusCode == 404) { template = null; }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); return; }
             if (template is not null && template.NextDueDate == task.OccurrenceDate)
             {
                 if (!await CompleteOccurrenceDialog.ShowAsync(Dialogs, template, Today)) return;
                 await OnChanged.InvokeAsync();
-                Undo.Show($"Kész: {task.Title}", () => Api.PostAsync<TemplateDto>($"api/templates/{templateId}/undo-last"), () => OnChanged.InvokeAsync());
+                Undo.Push($"Kész: {task.Title}", () => Api.PostAsync<TemplateDto>($"api/templates/{templateId}/undo-last"));
                 return;
             }
         }
 
         if (!await Run(() => Api.PostAsync<TaskDto>($"api/tasks/{task.Id}/complete"))) return;
-        Undo.Show($"Kész: {task.Title}", () => Api.PostAsync<TaskDto>($"api/tasks/{task.Id}/reopen"), () => OnChanged.InvokeAsync());
+        Undo.Push($"Kész: {task.Title}", () => Api.PostAsync<TaskDto>($"api/tasks/{task.Id}/reopen"));
     }
 
     private async Task Edit(TaskDto task)
@@ -230,7 +128,7 @@
 
     private Task SetFlags((TaskDto Task, bool Important, bool Urgent) x) =>
         Run(() => Api.PutAsync<TaskDto>($"api/tasks/{x.Task.Id}",
-            new TaskEditDto(x.Task.Title, x.Task.Notes, x.Important, x.Urgent, x.Task.DueDate)));
+            new TaskEditDto(x.Task.Title, x.Task.Notes, x.Important, x.Urgent, x.Task.DueDate, x.Task.Icon)));
 
     private async Task OnDropped(MudItemDropInfo<TaskDto> info)
     {
@@ -253,11 +151,5 @@
             Snackbar.Add(ex.Message, Severity.Error);
             return false;
         }
-    }
-
-    private async Task<T?> TryGet<T>(Func<Task<T>> action) where T : class
-    {
-        try { return await action(); }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); return null; }
     }
 }

@@ -4,8 +4,10 @@
 
 <MudDialog>
     <DialogContent>
-        <MudTextField @bind-Value="_name" Label="Név" Required="true" MaxLength="200" AutoFocus="true" />
+        <MudTextField @bind-Value="_name" Label="Név" Required="true" RequiredError="Add meg a nevet." MaxLength="200" AutoFocus="true" />
+        @* Magyar sorrend: év – hónap – nap *@
         <div class="d-flex gap-2">
+            <MudNumericField @bind-Value="_year" Label="Év (opc.)" Min="1900" Max="2100" Clearable="true" Style="flex:1.3" />
             <MudSelect T="int" @bind-Value="_month" Label="Hónap" Style="flex:2">
                 @for (var m = 1; m <= 12; m++)
                 {
@@ -14,7 +16,6 @@
                 }
             </MudSelect>
             <MudNumericField @bind-Value="_day" Label="Nap" Min="1" Max="31" Style="flex:1" />
-            <MudNumericField @bind-Value="_year" Label="Év (opc.)" Min="1900" Max="2100" Clearable="true" Style="flex:1.3" />
         </div>
         <MudTextField @bind-Value="_notes" Label="Megjegyzés (pl. ajándékötlet)" Lines="2" MaxLength="1000" />
     </DialogContent>
@@ -34,8 +35,8 @@
     [Parameter] public BirthdayDto? Birthday { get; set; }
 
     private string? _name;
-    private int _month = DateTime.Today.Month;
-    private int _day = DateTime.Today.Day;
+    private int _month = Format.Today.Month;
+    private int _day = Format.Today.Day;
     private int? _year;
     private string? _notes;
     private bool _busy;

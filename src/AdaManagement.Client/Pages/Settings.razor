@@ -5,67 +5,146 @@
 @inject ThemeService Themes
 @implements IDisposable
 
-<PageTitle>Beállítások – Ada</PageTitle>
-<MudText Typo="Typo.h5" Class="mb-2">Beállítások</MudText>
+<PageTitle>Beállítások – Adam's family dashboard</PageTitle>
 
-@if (_settings is null)
-{
-    <MudProgressLinear Indeterminate="true" />
-}
-else
-{
-    <MudPaper Class="pa-3 mb-3" Elevation="1">
-        <MudText Typo="Typo.subtitle1"><b>Időjárás helyszíne</b></MudText>
-        <MudText Typo="Typo.body2" Class="mb-2">Jelenleg: @_label (@_lat.ToString("0.####"), @_lon.ToString("0.####"))</MudText>
-        <div class="d-flex gap-2 align-center">
-            <MudTextField @bind-Value="_search" Placeholder="Település keresése…" OnKeyDown="SearchKey" Immediate="true" Class="flex-grow-1 mt-0" />
-            <MudButton Variant="Variant.Outlined" OnClick="Search" Disabled="string.IsNullOrWhiteSpace(_search)">Keresés</MudButton>
+<section class="hero sub-hero">
+    <div class="hero-content">
+        <div class="hero-kicker">Személyre szabás</div>
+        <div class="hero-head">
+            <div class="sub-hero-name">
+                <BackButton />
+                <h1 class="hero-title">Beállítások</h1>
+            </div>
         </div>
-        @foreach (var p in _places)
-        {
-            <MudButton Variant="Variant.Text" FullWidth="true" Class="justify-start" OnClick="() => Pick(p)">@p.Display</MudButton>
-        }
-    </MudPaper>
+        <div class="hero-meta">
+            <span class="hero-stat">Téma: <b>@Themes.Current.Name</b></span>
+            @if (_settings is not null)
+            {
+                <span class="hero-stat">Helyszín: <b>@_settings.WeatherLabel</b></span>
+                <span class="hero-stat">Előrejelzés: <b>@_settings.BirthdayLookaheadDays</b> nap</span>
+            }
+        </div>
+    </div>
+</section>
 
-    <MudPaper Class="pa-3 mb-3" Elevation="1">
-        <MudText Typo="Typo.subtitle1"><b>Születésnapok</b></MudText>
-        <MudNumericField @bind-Value="_lookahead" Label="Előrejelzés (nap)" Min="1" Max="366" HelperText="Ennyi nappal előre jelenjen meg a „Közelgő” sávban." />
-    </MudPaper>
-
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" Disabled="_busy" Class="mb-4">Mentés</MudButton>
-}
-
-@* A megjelenés eszközönként, azonnal mentődik (nem kell a Mentés gomb). *@
-<MudPaper Class="pa-3 mb-3" Elevation="1">
-    <MudText Typo="Typo.subtitle1"><b>Megjelenés</b></MudText>
-    <MudText Typo="Typo.caption" Class="mud-text-secondary">Ezen az eszközön érvényes, azonnal életbe lép.</MudText>
-    <div class="theme-grid mt-2">
+@* Megjelenés: eszközönként, azonnal életbe lép (nem kell a Mentés gomb). Minden csempe a saját témájában rajzolja
+   meg a kezdőkép kicsinyített mását (a téma CSS-változóit a csempe saját osztályai adják). *@
+<section class="set-card set-wide">
+    <div class="set-card-head">
+        <span class="set-card-icon"><MudIcon Icon="@Icons.Material.Outlined.Palette" /></span>
+        <div>
+            <div class="set-card-title">Megjelenés</div>
+            <div class="set-card-sub">Ezen az eszközön érvényes, azonnal életbe lép.</div>
+        </div>
+    </div>
+    <div class="set-themes" role="radiogroup" aria-label="Téma">
         @foreach (var t in ThemeService.All)
         {
             var selected = Themes.Current.Id == t.Id;
-            <button type="button" class="@($"theme-card {(selected ? "selected" : "")}")" @onclick="() => Themes.SetThemeAsync(t.Id)" aria-pressed="@selected">
-                <span class="swatch">
-                    @foreach (var c in t.Swatch) { <span style="background:@c"></span> }
+            <button type="button" role="radio" aria-checked="@(selected ? "true" : "false")" tabindex="@(selected ? 0 : -1)"
+                    class="@($"theme-tile theme-mozi theme-{t.Key} {(t.IsDynamic ? "tp-dynamic" : "")} {(selected ? "selected" : "")}")"
+                    @onclick="() => Themes.SetThemeAsync(t.Id)">
+                <span class="tp-preview" aria-hidden="true">
+                    <span class="tp-kicker"></span>
+                    <span class="tp-title"></span>
+                    <span class="tp-btn"></span>
+                    <span class="tp-cards">
+                        <span style="--hue:0"></span><span style="--hue:200"></span><span style="--hue:120"></span>
+                    </span>
                 </span>
-                <span class="theme-name">@t.Name</span>
-                <span class="theme-desc">@t.Description</span>
+                <span class="tp-meta">
+                    <span class="tp-name">@t.Name</span>
+                    <span class="tp-tag">@(t.IsDynamic ? "Dinamikus" : "Statikus")</span>
+                </span>
+                <span class="tp-desc">@t.Description</span>
+                @if (selected)
+                {
+                    <span class="tp-check"><MudIcon Icon="@Icons.Material.Filled.Check" /></span>
+                }
             </button>
         }
     </div>
+</section>
 
-    <MudText Typo="Typo.body2" Class="mt-4 mb-1"><b>Háttéranimáció</b></MudText>
-    <MudRadioGroup T="BackgroundAnimation" Value="Themes.Animation" ValueChanged="v => Themes.SetAnimationAsync(v)">
-        @foreach (var (value, label) in MainLayout.AnimationOptions)
+@if (_settings is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="set-grid">
+        <section class="set-card">
+            <div class="set-card-head">
+                <span class="set-card-icon"><MudIcon Icon="@Icons.Material.Outlined.WbSunny" /></span>
+                <div>
+                    <div class="set-card-title">Időjárás helyszíne</div>
+                    <div class="set-card-sub">Ehhez a településhez kéri le az előrejelzést.</div>
+                </div>
+            </div>
+            <div class="set-place">
+                <MudIcon Icon="@Icons.Material.Filled.Place" />
+                <div>
+                    <div class="set-place-name">@_label</div>
+                    <div class="set-place-coord">@_lat.ToString("0.####"), @_lon.ToString("0.####")</div>
+                </div>
+            </div>
+            <div class="set-search">
+                <MudTextField @bind-Value="_search" Placeholder="Település keresése…" OnKeyDown="SearchKey" Immediate="true"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Class="sub-search" UserAttributes="@(new() { ["aria-label"] = "Település keresése" })" />
+                <button type="button" class="hero-btn" disabled="@string.IsNullOrWhiteSpace(_search)" @onclick="Search">Keresés</button>
+            </div>
+            @if (_places.Count > 0)
+            {
+                <div class="up-list set-results">
+                    @foreach (var p in _places)
+                    {
+                        <button type="button" class="up-item" @onclick="() => Pick(p)">
+                            <span class="up-emoji">📍</span>
+                            <span class="up-name">@p.Display</span>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="set-card">
+            <div class="set-card-head">
+                <span class="set-card-icon"><MudIcon Icon="@Icons.Material.Outlined.Cake" /></span>
+                <div>
+                    <div class="set-card-title">Születésnapok</div>
+                    <div class="set-card-sub">Ennyi nappal előre jelenjen meg a „Hamarosan” listában.</div>
+                </div>
+            </div>
+            <div class="set-chips" role="radiogroup" aria-label="Előrejelzés napokban">
+                @foreach (var d in LookaheadPresets)
+                {
+                    <button type="button" role="radio" aria-checked="@(_lookahead == d ? "true" : "false")" tabindex="@(_lookahead == d || (d == LookaheadPresets[0] && !LookaheadPresets.Contains(_lookahead)) ? 0 : -1)"
+                            class="@($"set-chip {(_lookahead == d ? "on" : "")}")" @onclick="() => _lookahead = d">@d nap</button>
+                }
+            </div>
+            <MudNumericField @bind-Value="_lookahead" Label="Egyedi (nap)" Min="1" Max="366" Variant="Variant.Outlined" Margin="Margin.Dense" Class="set-number" />
+        </section>
+    </div>
+
+    <div class="set-save">
+        <button type="button" class="hero-btn primary" disabled="@(_busy || !Dirty)" @onclick="Save">
+            <MudIcon Icon="@Icons.Material.Filled.Save" /> Mentés
+        </button>
+        @if (Dirty)
         {
-            <MudRadio Value="value" Color="Color.Primary" Dense="true">@label</MudRadio>
+            <span class="set-state">Nem mentett változás</span>
         }
-    </MudRadioGroup>
-    <MudText Typo="Typo.caption" Class="mud-text-secondary">
-        Ha a rendszerben be van kapcsolva a „mozgás csökkentése”, az animáció nem indul el.
-    </MudText>
-</MudPaper>
+        else if (_saved)
+        {
+            <span class="set-state ok"><MudIcon Icon="@Icons.Material.Filled.Check" /> Mentve</span>
+        }
+    </div>
+}
 
 @code {
+    private static readonly int[] LookaheadPresets = [7, 14, 30, 60, 90];
+
     protected override void OnInitialized() => Themes.Changed += OnThemeChanged;
     private void OnThemeChanged() => InvokeAsync(StateHasChanged);
     public void Dispose() => Themes.Changed -= OnThemeChanged;
@@ -78,6 +157,11 @@ else
     private string? _search;
     private IReadOnlyList<GeoPlace> _places = [];
     private bool _busy;
+    private bool _saved;
+
+    /// <summary>Van-e a mentetthez képest eltérés (helyszín vagy előrejelzés).</summary>
+    private bool Dirty => _settings is not null &&
+        (_label != _settings.WeatherLabel || _lat != _settings.Latitude || _lon != _settings.Longitude || _lookahead != _settings.BirthdayLookaheadDays);
 
     protected override async Task OnInitializedAsync()
     {
@@ -118,7 +202,7 @@ else
         try
         {
             _settings = await Api.PutAsync<SettingsDto>("api/settings", new SettingsDto(_label, _lat, _lon, _lookahead));
-            Snackbar.Add("Mentve.", Severity.Success);
+            _saved = true;   // felugró értesítés helyett a gomb mellett jelez
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         finally { _busy = false; }

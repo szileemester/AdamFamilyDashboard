@@ -132,6 +132,9 @@ namespace AdaManagement.Server.Data.Migrations
                     b.Property<DateOnly>("AnchorDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("IntervalMonths")
                         .HasColumnType("int");
 
@@ -177,6 +180,10 @@ namespace AdaManagement.Server.Data.Migrations
 
                     b.Property<DateOnly?>("DueDate")
                         .HasColumnType("date");
+
+                    b.Property<string>("Icon")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<bool>("IsImportant")
                         .HasColumnType("bit");
