@@ -330,6 +330,36 @@ public class EndpointTests(ApiFixture fx)
         }
     }
 
+    // ---------- Szakik ----------
+
+    [Fact]
+    public async Task Szaki_felvetel_modositas_torles()
+    {
+        var api = await fx.OwnerAsync();
+        var name = Unique("Kovács Béla");
+        var created = await api.Post<TradespersonDto>("api/tradespeople",
+            new TradespersonEditDto("  Villanyszerelő ", name, "+36 30 123 4567", "bela@pelda.hu", "villany-bela.hu", "  "));
+
+        Assert.Equal("Villanyszerelő", created.Occupation); // levágva
+        Assert.Null(created.Notes);                         // üres → null
+        Assert.Contains(await api.Get<List<TradespersonDto>>("api/tradespeople"), t => t.Id == created.Id);
+
+        var updated = await api.Put<TradespersonDto>($"api/tradespeople/{created.Id}",
+            new TradespersonEditDto("Vízszerelő", name, null, null, null, "Gyors és pontos"));
+        Assert.Equal(("Vízszerelő", (string?)null, "Gyors és pontos"), (updated.Occupation, updated.Phone, updated.Notes));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await api.DeleteAsync($"api/tradespeople/{created.Id}")).StatusCode);
+        Assert.DoesNotContain(await api.Get<List<TradespersonDto>>("api/tradespeople"), t => t.Id == created.Id);
+        Assert.Equal(HttpStatusCode.NotFound, (await api.DeleteAsync($"api/tradespeople/{created.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Szakik_bejelentkezes_nelkul_nem_erhetok_el()
+    {
+        var r = await fx.Anonymous().GetAsync("api/tradespeople");
+        Assert.NotEqual(HttpStatusCode.OK, r.StatusCode);
+    }
+
     // ---------- Bemenet-ellenőrzés: 400, nem 500 ----------
 
     public static TheoryData<string, string, object> InvalidInputs => new()
@@ -345,6 +375,12 @@ public class EndpointTests(ApiFixture fx)
         { "POST", "api/birthdays", new BirthdayEditDto("Rossz nap", 2, 30, null, null) },
         { "PUT", "api/settings", new SettingsDto(new string('h', 201), 47.5, 19.04, 30) },
         { "PUT", "api/settings", new SettingsDto("Budapest", 95, 19.04, 30) },
+        { "POST", "api/tradespeople", new TradespersonEditDto(" ", "Béla", null, null, null, null) },
+        { "POST", "api/tradespeople", new TradespersonEditDto("Festő", "", null, null, null, null) },
+        { "POST", "api/tradespeople", new TradespersonEditDto(new string('f', 101), "Béla", null, null, null, null) },
+        { "POST", "api/tradespeople", new TradespersonEditDto("Festő", "Béla", "hívj fel", null, null, null) },
+        { "POST", "api/tradespeople", new TradespersonEditDto("Festő", "Béla", null, "nem-email", null, null) },
+        { "POST", "api/tradespeople", new TradespersonEditDto("Festő", "Béla", null, null, "javascript:alert(1)", null) },
     };
 
     [Theory]

@@ -1,0 +1,151 @@
+@page "/szakik"
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>Szakik – Adam's family dashboard</PageTitle>
+
+@* Kezdőkép kereséssel és foglalkozás-gyorsszűrőkkel, alatta a szakik foglalkozásonként csoportosítva, kártyákon. *@
+<section class="hero sub-hero">
+    <div class="hero-content">
+        <div class="hero-kicker">Megbízható emberek</div>
+        <div class="hero-head">
+            <div class="sub-hero-name">
+                <BackButton />
+                <h1 class="hero-title">Szakik</h1>
+            </div>
+            <div class="hero-actions">
+                <button type="button" class="hero-btn primary" @onclick="Add"><MudIcon Icon="@Icons.Material.Filled.Add" /> Új</button>
+            </div>
+        </div>
+        @if (_items is { Count: > 0 })
+        {
+            <div class="hero-meta">
+                <span class="hero-stat"><b>@_items.Count</b> szaki</span>
+                <span class="hero-stat"><b>@_groups.Count</b> foglalkozás</span>
+            </div>
+            <MudTextField @bind-Value="_query" Placeholder="Keresés foglalkozás szerint (pl. villanyszerelő)…" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="sub-search"
+                          UserAttributes="@(new() { ["aria-label"] = "Keresés foglalkozás szerint" })" />
+            <div class="sz-chips" role="group" aria-label="Foglalkozások">
+                @{ var query = Format.Fold(_query); }
+                @foreach (var g in _groups)
+                {
+                    var selected = query == g.Key;
+                    <button type="button" class="@($"sz-chip {(selected ? "on" : "")}")" style="@($"--hue:{g.Hue}")"
+                            aria-pressed="@(selected ? "true" : "false")" @onclick="() => _query = selected ? null : g.Occupation">
+                        <MudIcon Icon="@g.Icon" /> @g.Occupation
+                    </button>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+@if (_items is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <div class="sub-empty">Még nincs szaki felvéve. Az „Új” gombbal veheted fel az elsőt.</div>
+}
+else
+{
+    var q = Format.Fold(_query);
+    var groups = _groups.Where(g => g.Key.Contains(q)).ToList();
+    @if (groups.Count == 0)
+    {
+        <div class="sub-empty">Nincs ilyen foglalkozású szaki: „@_query”.</div>
+    }
+    @foreach (var g in groups)
+    {
+        <h2 class="sub-section">@g.Occupation <span class="m-count">@g.People.Count</span></h2>
+        <div class="sz-grid">
+            @foreach (var t in g.People)
+            {
+                <article class="sz-card" style="@($"--hue:{g.Hue}")">
+                    <MudIcon Icon="@g.Icon" Class="sz-art" aria-hidden="true" />
+                    <button type="button" class="sz-open" aria-label="@($"{t.Name} ({t.Occupation}) szerkesztése")" @onclick="() => Edit(t)"></button>
+                    <div class="sz-head">
+                        <div class="bd-avatar">@Format.Initials(t.Name)</div>
+                        <div class="sz-id">
+                            <div class="bd-name">@t.Name</div>
+                            <div class="sz-occ">@t.Occupation</div>
+                        </div>
+                    </div>
+                    @if (t.Phone is not null || t.Email is not null || t.Website is not null)
+                    {
+                        <div class="sz-contacts">
+                            @if (t.Phone is { } phone)
+                            {
+                                <a class="sz-link" href="@ContactLinks.PhoneHref(phone)" aria-label="@($"{t.Name} hívása: {phone}")">
+                                    <MudIcon Icon="@Icons.Material.Filled.Phone" /><span>@phone</span>
+                                </a>
+                            }
+                            @if (t.Email is { } email)
+                            {
+                                <a class="sz-link sz-iconic" href="@($"mailto:{email}")" aria-label="@($"E-mail {t.Name} részére: {email}")">
+                                    <MudIcon Icon="@Icons.Material.Filled.Email" /><span>@email</span>
+                                </a>
+                            }
+                            @if (t.Website is { } web && ContactLinks.WebsiteUrl(web) is { } url)
+                            {
+                                <a class="sz-link sz-iconic" href="@url" target="_blank" rel="noopener noreferrer" aria-label="@($"{t.Name} weboldala: {ContactLinks.WebsiteLabel(web)}")">
+                                    <MudIcon Icon="@Icons.Material.Filled.Language" /><span>@ContactLinks.WebsiteLabel(web)</span>
+                                </a>
+                            }
+                        </div>
+                    }
+                    @if (t.Notes is { } n)
+                    {
+                        <div class="sz-notes">@n</div>
+                    }
+                </article>
+            }
+        </div>
+    }
+}
+
+@code {
+    private List<TradespersonDto>? _items;
+    private string? _query;
+
+    /// <summary>Egy foglalkozás csoportja: a kis- és nagybetűs, ékezetes változatok egy csoportba kerülnek (Key = ékezet nélkül).</summary>
+    private sealed record Group(string Key, string Occupation, string Icon, int Hue, List<TradespersonDto> People);
+
+    /// <summary>Betöltéskor egyszer számolva, ábécérendben; a keresés csak ezen szűr (Key részszövegre).</summary>
+    private List<Group> _groups = [];
+
+    private List<string> Occupations => _groups.Select(g => g.Occupation).ToList();
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _items = await Api.GetAsync<List<TradespersonDto>>("api/tradespeople"); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items ??= []; }
+
+        var byName = StringComparer.CurrentCultureIgnoreCase;
+        _groups = _items
+            .GroupBy(t => Format.Fold(t.Occupation))
+            .Select(g =>
+            {
+                var occupation = g.First().Occupation;
+                return new Group(g.Key, occupation, TradeIcons.For(occupation), TradeIcons.Hue(occupation), g.OrderBy(t => t.Name, byName).ToList());
+            })
+            .OrderBy(g => g.Occupation, byName)
+            .ToList();
+    }
+
+    private async Task Add()
+    {
+        if (await TradespersonEditDialog.ShowAsync(Dialogs, null, Occupations)) await Load();
+    }
+
+    private async Task Edit(TradespersonDto t)
+    {
+        if (await TradespersonEditDialog.ShowAsync(Dialogs, t, Occupations)) await Load();
+    }
+}

@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using AdaManagement.Shared;
 using MudBlazor;
 
@@ -49,7 +47,7 @@ public static class TaskIcons
     public static TaskIcon? Guess(string? title)
     {
         if (string.IsNullOrWhiteSpace(title)) return null;
-        var words = Normalize(title).Split([' ', '-', ',', '.', '/', ':', ';', '(', ')'], StringSplitOptions.RemoveEmptyEntries);
+        var words = Format.Fold(title).Split([' ', '-', ',', '.', '/', ':', ';', '(', ')'], StringSplitOptions.RemoveEmptyEntries);
         // Szóeleji egyezés: „olajcsere” → olaj, de a „fu” (fű) ne illeszkedjen a „futas”-ra – ezért a rövid (≤2 betűs) kulcsszó csak teljes szóra.
         return All.FirstOrDefault(i => i.Keywords.Any(k => words.Any(w => k.Length <= 2 ? w == k : w.StartsWith(k, StringComparison.Ordinal) || (k.Length >= 4 && w.Contains(k, StringComparison.Ordinal)))));
     }
@@ -57,14 +55,4 @@ public static class TaskIcons
     /// <summary>Megjelenítendő ikon: kézi választás → cím alapján → a negyed ikonja.</summary>
     public static string For(TaskDto task, QuadrantInfo quadrant) =>
         ByKey(task.Icon)?.Icon ?? Guess(task.Title)?.Icon ?? quadrant.FlagIcons.LastOrDefault() ?? Icons.Material.Outlined.Bedtime;
-
-    /// <summary>Kisbetű, ékezetek nélkül („Olajcsére” → „olajcsere”).</summary>
-    private static string Normalize(string s)
-    {
-        var d = s.ToLowerInvariant().Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(d.Length);
-        foreach (var c in d)
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark) sb.Append(c);
-        return sb.ToString();
-    }
 }

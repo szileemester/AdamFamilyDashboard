@@ -437,14 +437,14 @@ body:has(.app-root.is-dynamic)::before {
     transform: perspective(700px) scale(1);
     transition: transform .28s cubic-bezier(.2, .8, .2, 1), box-shadow .28s;
 }
-/* Megnyitás: átlátszó gomb az egész kártyán; a gombsor és a jelvények fölötte vannak. */
-.m-open {
+/* Megnyitás: átlátszó gomb az egész kártyán; a gombsor, a jelvények és a szakik linkjei fölötte vannak. */
+.m-open, .sz-open {
     position: absolute; inset: 0; z-index: 1;
     margin: 0; padding: 0; border: 0; border-radius: inherit;
     background: none; cursor: pointer; outline: none;
 }
 .m-open:disabled { cursor: default; }
-html.kbd .m-open:focus-visible { box-shadow: inset 0 0 0 2px var(--ink); }
+html.kbd :is(.m-open, .sz-open):focus-visible { box-shadow: inset 0 0 0 2px var(--ink); }
 .m-card-actions { position: relative; z-index: 2; }
 .m-badges { pointer-events: none; }
 .m-card-q1 { --accent: var(--q1); }
@@ -754,6 +754,91 @@ html.kbd .rp-main:focus-visible { box-shadow: inset 0 0 0 2px var(--ink); border
     0%, 100% { box-shadow: 0 0 0 2px var(--q2), 0 10px 28px rgba(245, 196, 81, .18); }
     50% { box-shadow: 0 0 0 2px var(--q2), 0 10px 48px rgba(245, 196, 81, .45); }
 }
+/* Szakik: foglalkozás-gyorsszűrők a keresés alatt, kártyák elérhetőségekkel (szín és háttérikon a foglalkozásból) */
+.sz-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.sz-chip {
+    --accent: hsl(var(--hue, 0) 75% 64%);
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px 4px 8px; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: .8rem; font-weight: 600; color: var(--ink);
+    background: rgba(var(--ink-rgb), .07); border: 1px solid rgba(var(--ink-rgb), .14);
+    backdrop-filter: blur(8px);
+    transition: background-color .2s, border-color .2s, transform .2s;
+}
+.sz-chip .mud-icon-root { font-size: 1rem; color: var(--accent); }
+.sz-chip:hover { border-color: var(--accent); transform: translateY(-1px); }
+.sz-chip.on { background: var(--accent); border-color: var(--accent); color: #111; }
+.sz-chip.on .mud-icon-root { color: inherit; }
+html.kbd .sz-chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; align-items: start; }
+.sz-card {
+    --accent: hsl(var(--hue, 0) 75% 64%);
+    position: relative; isolation: isolate; overflow: hidden;
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px; border-radius: 12px;
+    background: linear-gradient(120deg, hsl(var(--hue, 0) 60% 40% / .3), rgba(var(--panel-rgb), .78) 60%);
+    border: 1px solid rgba(var(--ink-rgb), .08);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, .35);
+    backdrop-filter: blur(8px);
+    transition: transform .28s cubic-bezier(.2, .8, .2, 1), box-shadow .28s, border-color .28s;
+    animation: hero-in .5s cubic-bezier(.2, .8, .2, 1) both;
+}
+.sz-card:hover, html.kbd .sz-card:focus-within { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 16px 36px rgba(0, 0, 0, .5); }
+.sz-art.mud-icon-root {
+    position: absolute; z-index: -1; right: -14px; top: -10px;
+    width: 104px; height: 104px; color: var(--accent); opacity: .16; transform: rotate(-12deg);
+    transition: transform .4s cubic-bezier(.2, .8, .2, 1), opacity .4s;
+}
+.sz-card:hover .sz-art { transform: rotate(0deg) scale(1.06); opacity: .24; }
+.sz-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sz-head .bd-avatar { width: 46px; height: 46px; font-size: 1rem; }
+.sz-id { min-width: 0; }
+.sz-occ { font-size: .7rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.sz-contacts { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.sz-link {
+    position: relative; z-index: 2; max-width: 100%;
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-left: -6px; padding: 4px 8px; border-radius: 8px;
+    font-size: .88rem; color: var(--ink); text-decoration: none;
+    transition: background-color .2s;
+}
+.sz-link span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sz-link .mud-icon-root { flex: none; font-size: 1.1rem; color: var(--accent); }
+.sz-link:hover { background: rgba(var(--ink-rgb), .1); }
+html.kbd .sz-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
+.sz-notes {
+    font-size: .8rem; color: rgba(var(--ink-rgb), .65); white-space: pre-line;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.theme-vilagos :is(.sz-card, .sz-chip) { --accent: hsl(var(--hue, 0) 62% 40%); }
+.theme-vilagos .sz-card { box-shadow: 0 2px 10px rgba(0, 0, 0, .08); }
+.theme-vilagos .sz-card:hover { box-shadow: 0 16px 34px rgba(0, 0, 0, .16); }
+.theme-vilagos .sz-chip.on { color: #fff; }
+@media (max-width: 700px) {
+    /* telefonon a gyorsszűrők egy vízszintesen görgethető sorban */
+    .sz-chips { flex-wrap: nowrap; overflow-x: auto; margin-inline: -16px; padding: 2px 16px 4px; scrollbar-width: none; }
+    .sz-chip { flex: none; }
+    /* tömörebb kártya: kisebb avatar és betűk, a foglalkozás a fejlécben úgyis látszik */
+    .sz-grid { gap: 8px; }
+    .sz-card { gap: 4px; padding: 10px 12px; border-radius: 10px; }
+    .sz-head { gap: 10px; }
+    .sz-head .bd-avatar { width: 36px; height: 36px; font-size: .8rem; }
+    .sz-card .bd-name { font-size: .95rem; }
+    .sz-occ { display: none; }
+    .sz-art.mud-icon-root { width: 64px; height: 64px; right: -8px; top: -6px; }
+    /* elérhetőségek egy sorban: a telefonszám kiírva, az e-mail és a weboldal ikon-gomb (a teljes cím az aria-labelben) */
+    .sz-contacts { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+    .sz-link { padding-block: 5px; font-size: .84rem; }
+    .sz-iconic { justify-content: center; width: 38px; height: 34px; margin-left: 0; padding: 0; background: rgba(var(--ink-rgb), .08); }
+    .sz-iconic span { display: none; }
+    .sz-contacts .sz-link:first-child:not(.sz-iconic) { margin-right: auto; }
+    .sz-link .mud-icon-root { font-size: 1rem; }
+    .sz-notes { font-size: .76rem; -webkit-line-clamp: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .sz-card, .sz-chip, .sz-art { animation: none; transition: none; }
+}
+
 /* Kész feladatok: kereső a kezdőképen, kompakt plakát-kártyák (szín: a negyed, amiben a feladat volt) */
 .sub-search { max-width: 520px; margin-top: 10px !important; }
 .theme-mozi .sub-search .mud-input-outlined { background: rgba(var(--ink-rgb), .06); border-radius: 8px; backdrop-filter: blur(8px); }

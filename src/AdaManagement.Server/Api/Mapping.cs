@@ -15,6 +15,8 @@ public static class Mapping
 
     public static BirthdayDto ToDto(this Birthday b) => new(b.Id, b.Name, b.Month, b.Day, b.Year, b.Notes);
 
+    public static TradespersonDto ToDto(this Tradesperson t) => new(t.Id, t.Occupation, t.Name, t.Phone, t.Email, t.Website, t.Notes);
+
     public static SettingsDto ToDto(this AppSettings s) => new(s.WeatherLabel, s.Latitude, s.Longitude, s.BirthdayLookaheadDays);
 
     public static string? Clean(this string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
@@ -71,6 +73,21 @@ public static class Validate
         Text(e, "Notes", d.Notes, ShortNotesMax);
         if (!BirthdayCalculator.IsValid(d.Month, d.Day)) e["Day"] = ["Érvénytelen dátum."];
         if (d.Year is { } y && (y < 1900 || y > today.Year)) e["Year"] = [$"1900 és {today.Year} között."];
+        return e;
+    }
+
+    public static Dictionary<string, string[]> Tradesperson(TradespersonEditDto d)
+    {
+        var e = new Dictionary<string, string[]>();
+        Text(e, "Occupation", d.Occupation, 100, required: "A foglalkozás kötelező.");
+        Text(e, "Name", d.Name, TitleMax, required: "A név kötelező.");
+        Text(e, "Notes", d.Notes, NotesMax);
+        if (d.Phone.Clean() is { } phone && (phone.Length > 50 || !ContactLinks.IsValidPhone(phone)))
+            e["Phone"] = ["Érvénytelen telefonszám."];
+        if (d.Email.Clean() is { } email && (email.Length > 254 || !ContactLinks.IsValidEmail(email)))
+            e["Email"] = ["Érvénytelen e-mail-cím."];
+        if (d.Website.Clean() is { } web && (web.Length > 500 || ContactLinks.WebsiteUrl(web) is null))
+            e["Website"] = ["Érvénytelen webcím."];
         return e;
     }
 

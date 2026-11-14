@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using MudBlazor;
 
 namespace AdaManagement.Client.Components;
@@ -65,4 +67,18 @@ public static class Format
     public static DateTime? ToDateTime(DateOnly? d) => d?.ToDateTime(TimeOnly.MinValue);
 
     public static DateOnly? ToDateOnly(DateTime? d) => d is null ? null : DateOnly.FromDateTime(d.Value);
+
+    /// <summary>Kereséshez: kisbetű, ékezetek nélkül, levágva („ Olajcsére” → „olajcsere”).</summary>
+    public static string Fold(string? s)
+    {
+        var d = (s ?? "").Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(d.Length);
+        foreach (var c in d)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark) sb.Append(c);
+        return sb.ToString();
+    }
+
+    /// <summary>Monogram: „Kovács Anna” → „KA”; egyszavas névnél az első betű.</summary>
+    public static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpper(p[0])));
 }

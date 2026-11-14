@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RecurringTemplate> RecurringTemplates => Set<RecurringTemplate>();
     public DbSet<CompletionLogEntry> CompletionLog => Set<CompletionLogEntry>();
     public DbSet<Birthday> Birthdays => Set<Birthday>();
+    public DbSet<Tradesperson> Tradespeople => Set<Tradesperson>();
     public DbSet<AppSettings> Settings => Set<AppSettings>();
 
     /// <summary>A cookie-titkosító kulcsok az adatbázisban: így az F1 újraindulásai után is bent maradsz.</summary>
@@ -44,6 +45,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Notes).HasMaxLength(1000);
+        });
+
+        b.Entity<Tradesperson>(e =>
+        {
+            e.Property(x => x.Occupation).HasMaxLength(100);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Phone).HasMaxLength(50);
+            e.Property(x => x.Email).HasMaxLength(254);
+            e.Property(x => x.Website).HasMaxLength(500);
+            e.Property(x => x.Notes).HasMaxLength(2000);
+            e.HasIndex(x => x.Occupation);
         });
 
         b.Entity<AppSettings>(e =>

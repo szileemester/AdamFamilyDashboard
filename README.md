@@ -10,6 +10,8 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 - **Születésnapok**: kézi felvitel, állítható előrejelzés (alapból 30 nap). Feb 29 → nem szökőévben Feb 28.
 - **Időjárás**: Open-Meteo (kulcs nélkül), egy beállítható helyszín. A kezdőképen ma + 2 nap; kattintásra heti
   előrejelzés, naponként lenyíló órás bontással.
+- **Szakik**: megbízható szakemberek (foglalkozás, név, telefon, e-mail, weboldal, megjegyzés) kártyákon,
+  foglalkozásonként csoportosítva. Keresés foglalkozásra (ékezet nélkül is), gyorsszűrő gombokkal.
 - **Témák**: Piros és Kék (mozgó háttér), Sötét és Világos (statikus). Eszközönként tárolódik.
 
 ## Felépítés

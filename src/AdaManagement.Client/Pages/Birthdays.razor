@@ -56,7 +56,7 @@ else
                          @onclick="() => Edit(b.Item)">
                     <div class="bd-feature-art" aria-hidden="true"></div>
                     @if (b.Days == 0) { <span class="bd-feature-emoji" aria-hidden="true">🎉</span> }
-                    <div class="bd-avatar">@Initials(b.Item.Name)</div>
+                    <div class="bd-avatar">@Format.Initials(b.Item.Name)</div>
                     <div class="bd-feature-body">
                         <div class="bd-name">@b.Item.Name</div>
                         <div class="bd-sub">@DateText(b.Item, b.Next)@(b.Age is { } a ? $" · {a} éves lesz" : "")</div>
@@ -90,7 +90,7 @@ else
                 <article class="bd-card" style="@($"--hue:{b.Item.Id * 47 % 360}")"
                          role="button" tabindex="0" aria-label="@($"{b.Item.Name} szerkesztése")"
                          @onclick="() => Edit(b.Item)">
-                    <div class="bd-avatar">@Initials(b.Item.Name)</div>
+                    <div class="bd-avatar">@Format.Initials(b.Item.Name)</div>
                     <div class="bd-card-body">
                         <div class="bd-name">@b.Item.Name</div>
                         <div class="bd-sub">@DateText(b.Item, b.Next)@(b.Age is { } a ? $" · {a} éves lesz" : "")</div>
@@ -119,10 +119,6 @@ else
             }).OrderBy(x => x.Item2).ThenBy(x => x.b.Name);
         }
     }
-
-    /// <summary>„Kovács Anna” → „KA”; egyszavas névnél az első betű.</summary>
-    private static string Initials(string name) =>
-        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpper(p[0])));
 
     private static string Capital(string s) => s.Length == 0 ? s : char.ToUpper(s[0]) + s[1..];
 

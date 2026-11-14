@@ -151,6 +151,18 @@ public class Birthday
     public string? Notes { get; set; }
 }
 
+/// <summary>Megbízható szakember („szaki”): foglalkozás, név és elérhetőségek.</summary>
+public class Tradesperson
+{
+    public int Id { get; set; }
+    public required string Occupation { get; set; }
+    public required string Name { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Website { get; set; }
+    public string? Notes { get; set; }
+}
+
 /// <summary>Egyetlen sor az alkalmazás beállításaival.</summary>
 public class AppSettings
 {

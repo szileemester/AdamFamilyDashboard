@@ -41,6 +41,10 @@ public record UpcomingBirthdayDto(int Id, string Name, DateOnly Date, int DaysUn
 
 public record UpcomingMaintenanceDto(int TemplateId, string Title, DateOnly DueDate, int DaysUntil);
 
+public record TradespersonDto(int Id, string Occupation, string Name, string? Phone, string? Email, string? Website, string? Notes);
+
+public record TradespersonEditDto(string Occupation, string Name, string? Phone, string? Email, string? Website, string? Notes);
+
 public record SettingsDto(string WeatherLabel, double Latitude, double Longitude, int BirthdayLookaheadDays);
 
 public record DashboardDto(

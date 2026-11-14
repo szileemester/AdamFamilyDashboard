@@ -1,0 +1,99 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<MudDialog>
+    <DialogContent>
+        @* A foglalkozásnál a már felvettek közül is lehet választani, így egy csoportba kerülnek. A mentett érték a beírt
+           szöveg (TextChanged): így a Mentés a mezőből kilépés nélkül is azonnal elérhető, és a kitörölt szöveg nem
+           hagyja bent a régi foglalkozást. A javaslatlista csak gépeléskor nyílik le (fókuszkor eltakarná a Név mezőt).
+           Nincs Required: a szöveg-kötés miatt üresen azonnal hibát mutatna; a kötelezőséget a letiltott Mentés adja. *@
+        <MudAutocomplete T="string" @bind-Value="_occupation" Text="@_occupationText" TextChanged="t => _occupationText = t"
+                         Label="Foglalkozás*" SearchFunc="SearchOccupations" CoerceValue="true"
+                         MaxLength="100" AutoFocus="@(Tradesperson is null)"
+                         ResetValueOnEmptyText="true" Clearable="false" ShowProgressIndicator="false"
+                         OpenOnFocus="false" SelectOnActivation="false" />
+        <MudTextField @bind-Value="_name" Label="Név" Required="true" RequiredError="Add meg a nevet." MaxLength="200" />
+        <MudTextField @bind-Value="_phone" Label="Telefonszám" InputType="InputType.Telephone" MaxLength="50" Immediate="true"
+                      Error="@(PhoneError is not null)" ErrorText="@PhoneError" AdornmentIcon="@Icons.Material.Filled.Phone" Adornment="Adornment.Start" />
+        <MudTextField @bind-Value="_email" Label="E-mail-cím" InputType="InputType.Email" MaxLength="254" Immediate="true"
+                      Error="@(EmailError is not null)" ErrorText="@EmailError" AdornmentIcon="@Icons.Material.Filled.Email" Adornment="Adornment.Start" />
+        <MudTextField @bind-Value="_website" Label="Weboldal" InputType="InputType.Url" MaxLength="500" Immediate="true" Placeholder="pl. szaki.hu"
+                      Error="@(WebsiteError is not null)" ErrorText="@WebsiteError" AdornmentIcon="@Icons.Material.Filled.Language" Adornment="Adornment.Start" />
+        <MudTextField @bind-Value="_notes" Label="Megjegyzés (pl. ki ajánlotta, mit csinált)" Lines="3" Sizing="InputSizing.Auto" MaxLines="8" MaxLength="2000" />
+    </DialogContent>
+    <DialogActions>
+        @if (Tradesperson is not null)
+        {
+            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="Delete">Törlés</MudButton>
+        }
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="!CanSave">Mentés</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TradespersonDto? Tradesperson { get; set; }
+    [Parameter] public IReadOnlyList<string> Occupations { get; set; } = [];
+
+    private string? _occupation, _occupationText, _name, _phone, _email, _website, _notes;
+    private bool _busy;
+
+    private string? PhoneError => string.IsNullOrWhiteSpace(_phone) || ContactLinks.IsValidPhone(_phone) ? null : "Csak számjegy, szóköz, +, -, / és zárójel; legalább 6 számjegy.";
+    private string? EmailError => string.IsNullOrWhiteSpace(_email) || ContactLinks.IsValidEmail(_email) ? null : "Nem tűnik e-mail-címnek.";
+    private string? WebsiteError => string.IsNullOrWhiteSpace(_website) || ContactLinks.WebsiteUrl(_website) is not null ? null : "Nem tűnik webcímnek.";
+
+    private bool CanSave => !_busy && !string.IsNullOrWhiteSpace(_occupationText) &&!string.IsNullOrWhiteSpace(_name)
+                            && PhoneError is null && EmailError is null && WebsiteError is null;
+
+    public static async Task<bool> ShowAsync(IDialogService dialogs, TradespersonDto? tradesperson, IReadOnlyList<string> occupations)
+    {
+        var parameters = new DialogParameters<TradespersonEditDialog>
+        {
+            { x => x.Tradesperson, tradesperson },
+            { x => x.Occupations, occupations },
+        };
+        var dialog = await dialogs.ShowAsync<TradespersonEditDialog>(tradesperson is null ? "Új szaki" : "Szaki", parameters);
+        return await dialog.Result is { Canceled: false };
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Tradesperson is not { } t) return;
+        (_occupation, _name, _phone, _email, _website, _notes) = (t.Occupation, t.Name, t.Phone, t.Email, t.Website, t.Notes);
+        _occupationText = t.Occupation;
+    }
+
+    private Task<IEnumerable<string>> SearchOccupations(string? text, CancellationToken _)
+    {
+        var q = Format.Fold(text);
+        return Task.FromResult(Occupations.Where(o => Format.Fold(o).Contains(q)));
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            var dto = new TradespersonEditDto(_occupationText!.Trim(), _name!.Trim(), _phone, _email, _website, _notes);
+            if (Tradesperson is null) await Api.PostAsync<TradespersonDto>("api/tradespeople", dto);
+            else await Api.PutAsync<TradespersonDto>($"api/tradespeople/{Tradesperson.Id}", dto);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Törlés", $"Törlöd: {Tradesperson!.Name}?", yesText: "Törlés", cancelText: "Mégse") != true) return;
+        try
+        {
+            await Api.DeleteAsync($"api/tradespeople/{Tradesperson.Id}");
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

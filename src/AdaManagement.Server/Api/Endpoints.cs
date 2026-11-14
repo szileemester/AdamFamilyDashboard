@@ -20,6 +20,7 @@ public static class Endpoints
         MapTasks(api.MapGroup("/tasks"));
         MapTemplates(api.MapGroup("/templates"));
         MapBirthdays(api.MapGroup("/birthdays"));
+        MapTradespeople(api.MapGroup("/tradespeople"));
         MapSettings(api.MapGroup("/settings"));
 
         // Ismeretlen /api útvonal ne az index.html-t kapja.
@@ -367,6 +368,53 @@ public static class Endpoints
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
+    }
+
+    // ---------- Szakik ----------
+
+    private static void MapTradespeople(RouteGroupBuilder g)
+    {
+        g.MapGet("/", async (AppDbContext db, CancellationToken ct) =>
+            (await db.Tradespeople.OrderBy(t => t.Occupation).ThenBy(t => t.Name).ToListAsync(ct)).Select(t => t.ToDto()));
+
+        g.MapPost("/", async (TradespersonEditDto dto, AppDbContext db, CancellationToken ct) =>
+        {
+            if (Validate.Tradesperson(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            var t = new Tradesperson { Occupation = "", Name = "" };
+            Apply(t, dto);
+            db.Tradespeople.Add(t);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(t.ToDto());
+        });
+
+        g.MapPut("/{id:int}", async (int id, TradespersonEditDto dto, AppDbContext db, CancellationToken ct) =>
+        {
+            if (Validate.Tradesperson(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            var t = await db.Tradespeople.FindAsync([id], ct);
+            if (t is null) return Results.NotFound();
+            Apply(t, dto);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(t.ToDto());
+        });
+
+        g.MapDelete("/{id:int}", async (int id, AppDbContext db, CancellationToken ct) =>
+        {
+            var t = await db.Tradespeople.FindAsync([id], ct);
+            if (t is null) return Results.NotFound();
+            db.Tradespeople.Remove(t);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        static void Apply(Tradesperson t, TradespersonEditDto dto)
+        {
+            t.Occupation = dto.Occupation.Trim();
+            t.Name = dto.Name.Trim();
+            t.Phone = dto.Phone.Clean();
+            t.Email = dto.Email.Clean();
+            t.Website = dto.Website.Clean();
+            t.Notes = dto.Notes.Clean();
+        }
     }
 
     // ---------- Beállítások ----------
