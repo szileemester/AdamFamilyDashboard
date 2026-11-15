@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Hosting;
 using System.Net;
 using System.Net.Http.Json;
 using AdaManagement.Shared;
@@ -38,6 +39,27 @@ public class EndpointTests(ApiFixture fx)
     {
         var r = await fx.Anonymous().GetAsync("api/dashboard");
         Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
+    }
+
+    /// <summary>
+    /// Beállított Google-kliensnél (mint élesben) is 401 kell az API-ra, nem átirányítás a Google-re: a WASM kliens
+    /// fetch-e azt nem tudná követni. Az oldalak és a login viszont a Google-re visznek.
+    /// </summary>
+    [Fact]
+    public async Task Google_beallitva_az_api_401_a_login_a_Googlere_visz()
+    {
+        await using var google = fx.Factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Auth:Google:ClientId", "teszt-kliens");
+            b.UseSetting("Auth:Google:ClientSecret", "teszt-titok");
+        });
+        var client = google.CreateClient(new() { AllowAutoRedirect = false });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("api/me")).StatusCode);
+
+        var login = await client.GetAsync("account/login");
+        Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+        Assert.StartsWith("https://accounts.google.com/", login.Headers.Location!.ToString());
     }
 
     [Fact]

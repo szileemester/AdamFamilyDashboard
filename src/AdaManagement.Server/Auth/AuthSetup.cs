@@ -26,11 +26,10 @@ public static class AuthSetup
         if (!env.IsDevelopment() && (!googleConfigured || allowedSet.Count == 0))
             throw new InvalidOperationException("Auth:Google:ClientId, Auth:Google:ClientSecret és Auth:AllowedEmails kötelező élesben.");
 
-        var auth = services.AddAuthentication(o =>
-            {
-                o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-                o.DefaultChallengeScheme = googleConfigured ? GoogleDefaults.AuthenticationScheme : CookieAuthenticationDefaults.AuthenticationScheme;
-            })
+        // A kihívás mindig a cookie-sémáé: az /api így 401-et ad (a WASM kliens erre navigál a loginra), az oldalak pedig
+        // az /account/login-ra irányítanak, ami már kifejezetten a Google-t hívja. Google alapértelmezett kihívással
+        // az /api is a Google-re irányítana, amit a kliens fetch-e nem tud követni.
+        var auth = services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(o =>
             {
                 o.Cookie.Name = "ada.auth";

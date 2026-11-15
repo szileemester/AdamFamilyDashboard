@@ -112,7 +112,7 @@ az deployment group create -g ada-rg -f infra/main.bicep -p infra/main.parameter
 4. A repó *Settings → Secrets and variables → Actions* menüjében:
    - Secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `SQL_CONNECTION_STRING`
      (ugyanaz, mint a Bicepben, `Connect Timeout=60`-nal)
-   - Variables: `AZURE_RESOURCE_GROUP` (`ada-rg`), `AZURE_SQL_SERVER` (`<namePrefix>-sql`), `AZURE_WEBAPP_NAME` (`<namePrefix>`)
+   - Variables: `AZURE_RESOURCE_GROUP` (`ada-rg`), `AZURE_SQL_SERVER` (`<namePrefix>-sql`, vagy a `sqlServerName` paraméter, ha megadtad), `AZURE_WEBAPP_NAME` (`<namePrefix>`)
 5. Hozz létre egy `production` environmentet. Ezután minden push a mainre tesztel, migrál és deployol.
 
 ### 4. Telefonra

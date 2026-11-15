@@ -33,9 +33,11 @@ param budgetEmail string
 @description('A budget kezdőnapja: egy hónap első napja, pl. 2026-11-01. Később nem módosítható.')
 param budgetStartDate string
 
+@description('Az SQL szerver neve (globálisan egyedi, kisbetű). Akkor írd át, ha a név foglalt, pl. egy elbukott telepítés után.')
+param sqlServerName string = '${namePrefix}-sql'
+
 var webAppName = namePrefix
 var planName = '${namePrefix}-plan'
-var sqlServerName = '${namePrefix}-sql'
 var dbName = 'adamanagement'
 
 // ---------- App Service: F1 (ingyenes) Linux ----------
@@ -62,6 +64,8 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
     httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'DOTNETCORE|10.0'
+      // A publish mappában a kliens runtimeconfig-ja is ott van, ezért a platform magától nem tudja, mit indítson.
+      appCommandLine: 'dotnet AdaManagement.Server.dll'
       alwaysOn: false // F1-en nem elérhető
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'

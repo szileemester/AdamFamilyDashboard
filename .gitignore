@@ -484,3 +484,6 @@ $RECYCLE.BIN/
 # Saját Azure paraméterek (személyes adatok)
 infra/main.parameters.json
 
+
+# Titkos kulcsok, jelszavak (soha nem kerülhetnek gitbe)
+.secrets/
