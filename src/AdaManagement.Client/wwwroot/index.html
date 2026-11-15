@@ -7,7 +7,6 @@
     <meta name="theme-color" content="#1a1a27" />
     <title>Adam's family dashboard</title>
     <base href="/" />
-    <link rel="preload" id="webassembly" />
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="css/app.css" />
@@ -15,7 +14,6 @@
     <link rel="icon" type="image/png" sizes="48x48" href="favicon.png" />
     <link href="manifest.webmanifest" rel="manifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
-    <script type="importmap"></script>
 </head>
 
 <body>
@@ -34,7 +32,9 @@
         <a href="." class="reload">Újratöltés</a>
         <span class="dismiss">✕</span>
     </div>
-    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <!-- Ujjlenyomat nélküli cím: a szerver MapStaticAssets-e az ujjlenyomatos fájlra képezi le. A {fingerprint}
+         helyőrzőt a hosztolt (Server által kiszolgált) publish nem cseréli ki, élesben 404 lett volna. -->
+    <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <script src="js/interactions.js"></script>
     <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
