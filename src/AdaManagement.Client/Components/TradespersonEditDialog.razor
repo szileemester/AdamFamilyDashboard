@@ -5,15 +5,17 @@
 
 <MudDialog>
     <DialogContent>
-        @* A foglalkozásnál a már felvettek közül is lehet választani, így egy csoportba kerülnek. A mentett érték a beírt
-           szöveg (TextChanged): így a Mentés a mezőből kilépés nélkül is azonnal elérhető, és a kitörölt szöveg nem
-           hagyja bent a régi foglalkozást. A javaslatlista csak gépeléskor nyílik le (fókuszkor eltakarná a Név mezőt).
-           Nincs Required: a szöveg-kötés miatt üresen azonnal hibát mutatna; a kötelezőséget a letiltott Mentés adja. *@
-        <MudAutocomplete T="string" @bind-Value="_occupation" Text="@_occupationText" TextChanged="t => _occupationText = t"
-                         Label="Foglalkozás*" SearchFunc="SearchOccupations" CoerceValue="true"
-                         MaxLength="100" AutoFocus="@(Tradesperson is null)"
-                         ResetValueOnEmptyText="true" Clearable="false" ShowProgressIndicator="false"
-                         OpenOnFocus="false" SelectOnActivation="false" />
+        @* A foglalkozás sima szövegmező; a már felvett foglalkozásokat a böngésző natív javaslatlistája (datalist) ajánlja
+           gépeléskor, így ugyanaz a csoport kerül elő. Nincs Required (üresen azonnal hibát mutatna): a kötelezőséget
+           a letiltott Mentés adja. *@
+        <MudTextField @bind-Value="_occupation" Label="Foglalkozás*" MaxLength="100" Immediate="true" AutoFocus="@(Tradesperson is null)"
+                      UserAttributes="@(new() { ["list"] = "sz-occupations", ["autocomplete"] = "off" })" />
+        <datalist id="sz-occupations">
+            @foreach (var o in Occupations)
+            {
+                <option value="@o"></option>
+            }
+        </datalist>
         <MudTextField @bind-Value="_name" Label="Név" Required="true" RequiredError="Add meg a nevet." MaxLength="200" />
         <MudTextField @bind-Value="_phone" Label="Telefonszám" InputType="InputType.Telephone" MaxLength="50" Immediate="true"
                       Error="@(PhoneError is not null)" ErrorText="@PhoneError" AdornmentIcon="@Icons.Material.Filled.Phone" Adornment="Adornment.Start" />
@@ -24,11 +26,14 @@
         <MudTextField @bind-Value="_notes" Label="Megjegyzés (pl. ki ajánlotta, mit csinált)" Lines="3" Sizing="InputSizing.Auto" MaxLines="8" MaxLength="2000" />
     </DialogContent>
     <DialogActions>
+        @* Telefonon (sm alatt) a Törlés és a Másolás csak ikon, hogy a négy gomb elférjen egy sorban. *@
         @if (Tradesperson is not null)
         {
-            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="Delete">Törlés</MudButton>
+            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="Delete" Class="d-none d-sm-flex">Törlés</MudButton>
+            <MudIconButton Color="Color.Error" Icon="@Icons.Material.Filled.Delete" OnClick="Delete" Class="d-sm-none" aria-label="Törlés" />
         }
-        <MudButton StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="Copy" Disabled="@(!HasCopyContent)">Másolás</MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="Copy" Disabled="@(!HasCopyContent)" Class="d-none d-sm-flex">Másolás</MudButton>
+        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" OnClick="Copy" Disabled="@(!HasCopyContent)" Class="d-sm-none" aria-label="Másolás" />
         <MudSpacer />
         <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="!CanSave">Mentés</MudButton>
@@ -40,14 +45,14 @@
     [Parameter] public TradespersonDto? Tradesperson { get; set; }
     [Parameter] public IReadOnlyList<string> Occupations { get; set; } = [];
 
-    private string? _occupation, _occupationText, _name, _phone, _email, _website, _notes;
+    private string? _occupation, _name, _phone, _email, _website, _notes;
     private bool _busy;
 
     private string? PhoneError => string.IsNullOrWhiteSpace(_phone) || ContactLinks.IsValidPhone(_phone) ? null : "Csak számjegy, szóköz, +, -, / és zárójel; legalább 6 számjegy.";
     private string? EmailError => string.IsNullOrWhiteSpace(_email) || ContactLinks.IsValidEmail(_email) ? null : "Nem tűnik e-mail-címnek.";
     private string? WebsiteError => string.IsNullOrWhiteSpace(_website) || ContactLinks.WebsiteUrl(_website) is not null ? null : "Nem tűnik webcímnek.";
 
-    private bool CanSave => !_busy && !string.IsNullOrWhiteSpace(_occupationText) &&!string.IsNullOrWhiteSpace(_name)
+    private bool CanSave => !_busy && !string.IsNullOrWhiteSpace(_occupation) && !string.IsNullOrWhiteSpace(_name)
                             && PhoneError is null && EmailError is null && WebsiteError is null;
 
     public static async Task<bool> ShowAsync(IDialogService dialogs, TradespersonDto? tradesperson, IReadOnlyList<string> occupations)
@@ -65,13 +70,6 @@
     {
         if (Tradesperson is not { } t) return;
         (_occupation, _name, _phone, _email, _website, _notes) = (t.Occupation, t.Name, t.Phone, t.Email, t.Website, t.Notes);
-        _occupationText = t.Occupation;
-    }
-
-    private Task<IEnumerable<string>> SearchOccupations(string? text, CancellationToken _)
-    {
-        var q = Format.Fold(text);
-        return Task.FromResult(Occupations.Where(o => Format.Fold(o).Contains(q)));
     }
 
     /// <summary>
@@ -80,7 +78,7 @@
     /// </summary>
     private (string Label, string? Value)[] CopyFields =>
     [
-        ("Foglalkozás", _occupationText), ("Név", _name), ("Telefon", _phone),
+        ("Foglalkozás", _occupation), ("Név", _name), ("Telefon", _phone),
         ("E-mail", _email), ("Weboldal", _website), ("Megjegyzés", _notes),
     ];
 
@@ -106,7 +104,7 @@
         _busy = true;
         try
         {
-            var dto = new TradespersonEditDto(_occupationText!.Trim(), _name!.Trim(), _phone, _email, _website, _notes);
+            var dto = new TradespersonEditDto(_occupation!.Trim(), _name!.Trim(), _phone, _email, _website, _notes);
             if (Tradesperson is null) await Api.PostAsync<TradespersonDto>("api/tradespeople", dto);
             else await Api.PutAsync<TradespersonDto>($"api/tradespeople/{Tradesperson.Id}", dto);
             MudDialog.Close(DialogResult.Ok(true));
