@@ -821,22 +821,7 @@ html.kbd .rp-main:focus-visible { box-shadow: inset 0 0 0 2px var(--ink); border
     0%, 100% { box-shadow: 0 0 0 2px var(--q2), 0 10px 28px rgba(245, 196, 81, .18); }
     50% { box-shadow: 0 0 0 2px var(--q2), 0 10px 48px rgba(245, 196, 81, .45); }
 }
-/* Szakik: foglalkozás-gyorsszűrők a keresés alatt, kártyák elérhetőségekkel (szín és háttérikon a foglalkozásból) */
-.sz-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.sz-chip {
-    --accent: hsl(var(--hue, 0) 75% 64%);
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 11px 4px 8px; border-radius: 999px; cursor: pointer;
-    font: inherit; font-size: .8rem; font-weight: 600; color: var(--ink);
-    background: rgba(var(--ink-rgb), .07); border: 1px solid rgba(var(--ink-rgb), .14);
-    backdrop-filter: blur(8px);
-    transition: background-color .2s, border-color .2s, transform .2s;
-}
-.sz-chip .mud-icon-root { font-size: 1rem; color: var(--accent); }
-.sz-chip:hover { border-color: var(--accent); transform: translateY(-1px); }
-.sz-chip.on { background: var(--accent); border-color: var(--accent); color: #111; }
-.sz-chip.on .mud-icon-root { color: inherit; }
-html.kbd .sz-chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* Szakik: kártyák elérhetőségekkel (szín és háttérikon a foglalkozásból) */
 .sz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; align-items: start; }
 .sz-card {
     --accent: hsl(var(--hue, 0) 75% 64%);
@@ -877,14 +862,9 @@ html.kbd .sz-link:focus-visible { outline: 2px solid var(--ink); outline-offset:
     font-size: .8rem; color: rgba(var(--ink-rgb), .65); white-space: pre-line;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
-.theme-vilagos :is(.sz-card, .sz-chip) { --accent: hsl(var(--hue, 0) 62% 40%); }
-.theme-vilagos .sz-card { box-shadow: 0 2px 10px rgba(0, 0, 0, .08); }
+.theme-vilagos .sz-card { --accent: hsl(var(--hue, 0) 62% 40%); box-shadow: 0 2px 10px rgba(0, 0, 0, .08); }
 .theme-vilagos .sz-card:hover { box-shadow: 0 16px 34px rgba(0, 0, 0, .16); }
-.theme-vilagos .sz-chip.on { color: #fff; }
 @media (max-width: 700px) {
-    /* telefonon a gyorsszűrők egy vízszintesen görgethető sorban */
-    .sz-chips { flex-wrap: nowrap; overflow-x: auto; margin-inline: -16px; padding: 2px 16px 4px; scrollbar-width: none; }
-    .sz-chip { flex: none; }
     /* tömörebb kártya: kisebb avatar és betűk, a foglalkozás a fejlécben úgyis látszik */
     .sz-grid { gap: 8px; }
     .sz-card { gap: 4px; padding: 10px 12px; border-radius: 10px; }
@@ -903,7 +883,7 @@ html.kbd .sz-link:focus-visible { outline: 2px solid var(--ink); outline-offset:
     .sz-notes { font-size: .76rem; -webkit-line-clamp: 2; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .sz-card, .sz-chip, .sz-art { animation: none; transition: none; }
+    .sz-card, .sz-art { animation: none; transition: none; }
 }
 
 /* Kész feladatok: kereső a kezdőképen, kompakt plakát-kártyák (szín: a negyed, amiben a feladat volt) */

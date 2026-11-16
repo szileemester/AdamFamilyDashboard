@@ -13,7 +13,8 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 - **Időjárás**: Open-Meteo (kulcs nélkül), egy beállítható helyszín. A kezdőképen ma + 2 nap; kattintásra heti
   előrejelzés, naponként lenyíló órás bontással.
 - **Szakik**: megbízható szakemberek (foglalkozás, név, telefon, e-mail, weboldal, megjegyzés) kártyákon,
-  foglalkozás szerinti sorrendben. Keresés foglalkozásra (ékezet nélkül is), gyorsszűrő gombokkal.
+  foglalkozás szerinti sorrendben. Keresés foglalkozásra (ékezet nélkül is); a szaki ablakából az adatai
+  „Címke: érték” soronként a vágólapra másolhatók.
 - **Témák**: Piros és Kék (mozgó háttér), Sötét és Világos (statikus). Eszközönként tárolódik.
 
 ## Felépítés

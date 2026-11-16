@@ -5,7 +5,7 @@
 
 <PageTitle>Szakik – Adam's family dashboard</PageTitle>
 
-@* Kezdőkép kereséssel és foglalkozás-gyorsszűrőkkel, alatta a szakik egyetlen rácsban, foglalkozás szerinti sorrendben
+@* Kezdőkép kereséssel, alatta a szakik egyetlen rácsban, foglalkozás szerinti sorrendben
    (foglalkozásonként jellemzően egy szaki van, a csoportcímek csak a helyet vinnék). *@
 <section class="hero sub-hero">
     <div class="hero-content">
@@ -29,17 +29,6 @@
                           AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Class="sub-search"
                           UserAttributes="@(new() { ["aria-label"] = "Keresés foglalkozás szerint" })" />
-            <div class="sz-chips" role="group" aria-label="Foglalkozások">
-                @{ var query = Format.Fold(_query); }
-                @foreach (var g in _groups)
-                {
-                    var selected = query == g.Key;
-                    <button type="button" class="@($"sz-chip {(selected ? "on" : "")}")" style="@($"--hue:{g.Hue}")"
-                            aria-pressed="@(selected ? "true" : "false")" @onclick="() => _query = selected ? null : g.Occupation">
-                        <MudIcon Icon="@g.Icon" /> @g.Occupation
-                    </button>
-                }
-            </div>
         }
     </div>
 </section>

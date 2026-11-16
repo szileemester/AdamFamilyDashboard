@@ -1,6 +1,7 @@
 @inject ApiClient Api
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
+@inject IJSRuntime JS
 
 <MudDialog>
     <DialogContent>
@@ -27,6 +28,7 @@
         {
             <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="Delete">Törlés</MudButton>
         }
+        <MudButton StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="Copy" Disabled="@(!HasCopyContent)">Másolás</MudButton>
         <MudSpacer />
         <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="!CanSave">Mentés</MudButton>
@@ -70,6 +72,33 @@
     {
         var q = Format.Fold(text);
         return Task.FromResult(Occupations.Where(o => Format.Fold(o).Contains(q)));
+    }
+
+    /// <summary>
+    /// A másolandó mezők, ahogy most az ablakban állnak (mentés nélkül is). A címkék szándékosan rövidebbek
+    /// a mezőcímkéknél: a vágólapra tömör „Telefon: …” sorok kerülnek.
+    /// </summary>
+    private (string Label, string? Value)[] CopyFields =>
+    [
+        ("Foglalkozás", _occupationText), ("Név", _name), ("Telefon", _phone),
+        ("E-mail", _email), ("Weboldal", _website), ("Megjegyzés", _notes),
+    ];
+
+    private bool HasCopyContent => CopyFields.Any(x => !string.IsNullOrWhiteSpace(x.Value));
+
+    /// <summary>A kitöltött mezők „Címke: érték” soronként.</summary>
+    private string CopyText => string.Join("\n", CopyFields
+        .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+        .Select(x => $"{x.Label}: {x.Value!.Trim()}"));
+
+    private async Task Copy()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", CopyText);
+            Snackbar.Add("Az adatok a vágólapra kerültek.", Severity.Success);
+        }
+        catch { Snackbar.Add("Nem sikerült a vágólapra másolni.", Severity.Error); }
     }
 
     private async Task Save()
