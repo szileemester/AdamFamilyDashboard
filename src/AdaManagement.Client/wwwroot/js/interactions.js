@@ -165,6 +165,36 @@
         if (Date.now() < suppressClickUntil) { e.preventDefault(); e.stopPropagation(); }
     }, true);
 
+    // ---------- Egérrel húzható vízszintes sávok ([data-drag-scroll], pl. az órás időjárás) ----------
+    // Érintésnél a böngésző natív görgetése marad. A mozgás-figyelők csak egy húzás idejére kerülnek az elemre.
+    document.addEventListener('pointerdown', e => {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        const el = e.target.closest('[data-drag-scroll]');
+        if (!el || el.scrollWidth <= el.clientWidth) return;
+        if (e.clientY > el.getBoundingClientRect().top + el.clientHeight) return; // a görgetősávot a böngésző kezeli
+        const x0 = e.clientX, left0 = el.scrollLeft;
+        let moved = false;
+        const move = ev => {
+            const dx = ev.clientX - x0;
+            if (!moved && Math.abs(dx) < 4) return;
+            if (!moved) { moved = true; el.classList.add('dragging'); }
+            el.scrollLeft = left0 - dx;
+            ev.preventDefault();
+        };
+        const end = () => {
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', end);
+            el.removeEventListener('pointercancel', end);
+            if (!moved) return;
+            el.classList.remove('dragging');
+            suppressClickUntil = Date.now() + 300; // a húzás végén ne nyíljon/csukódjon semmi
+        };
+        try { el.setPointerCapture(e.pointerId); } catch { /* már nem aktív mutató */ }
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', end);
+        el.addEventListener('pointercancel', end);
+    });
+
     function quadAt(x, y) { return document.elementFromPoint(x, y)?.closest('.m-quad') ?? null; }
 
     function cancelTouch() {
@@ -204,3 +234,6 @@
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
 })();
+
+// A feladat ablakában új teendő után a lista aljára görget (a hozzáadás mező felül van, az új elem alul).
+window.adaScrollToEnd = el => { if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); };

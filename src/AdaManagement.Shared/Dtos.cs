@@ -11,7 +11,21 @@ public record TaskDto(
     DateTime? CompletedAt,
     int? RecurringTemplateId,
     DateOnly? OccurrenceDate,
-    string? Icon);
+    string? Icon,
+    int ChecklistTotal = 0,
+    int ChecklistDone = 0,
+    int StoryCount = 0);
+
+/// <summary>Egy feladat mini teendői (sorrendben) és bejegyzései (a legújabb elöl).</summary>
+public record TaskStoryDto(List<ChecklistItemDto> Checklist, List<StoryEntryDto> Entries);
+
+public record ChecklistItemDto(int Id, string Text, bool IsDone);
+
+public record ChecklistItemEditDto(string Text, bool IsDone);
+
+public record StoryEntryDto(int Id, DateTimeOffset At, string Text);
+
+public record StoryEntryEditDto(DateTimeOffset At, string Text);
 
 /// <param name="Icon">Kézzel választott ikon kulcsa (null = automatikus a cím alapján).</param>
 public record TaskEditDto(string Title, string? Notes, bool IsImportant, bool IsUrgent, DateOnly? DueDate, string? Icon);

@@ -15,9 +15,27 @@
         <MudIcon Icon="@TaskIcons.For(Task, q)" Class="m-card-icon" />
     </div>
 
-    @if (Task.RecurringTemplateId is not null)
+    @if (Task.RecurringTemplateId is not null || HasMeta)
     {
-        <div class="m-badges"><span class="m-badge">Ismétlődő</span></div>
+        <div class="m-badges">
+            @if (Task.RecurringTemplateId is not null)
+            {
+                <span class="m-badge">Ismétlődő</span>
+            }
+            @if (Task.ChecklistTotal > 0)
+            {
+                @* Minden teendő kész: zöld, de a feladat attól még nyitott (a Kész gombot kézzel kell megnyomni). *@
+                <span class="@($"m-badge m-progress {(AllDone ? "ok" : "")}")" title="@($"Teendők: {Task.ChecklistDone} / {Task.ChecklistTotal} kész")">
+                    <MudIcon Icon="@CheckIcon" /> @Task.ChecklistDone/@Task.ChecklistTotal
+                </span>
+            }
+            @if (Task.StoryCount > 0)
+            {
+                <span class="m-badge m-progress" title="@($"Történet: {Task.StoryCount} bejegyzés")" aria-label="@($"{Task.StoryCount} bejegyzés")">
+                    <MudIcon Icon="@Icons.Material.Filled.History" />
+                </span>
+            }
+        </div>
     }
 
     <div class="m-card-body">
@@ -28,6 +46,20 @@
                 <span class="@($"m-due {(d < 0 ? "overdue" : d == 0 ? "today" : "")}")"> – @Format.Relative(d)</span>
             }
         </div>
+        @* Telefonos mini-kártyán a jelvények nem férnek el: ott a cím alatt egy kis sorban látszik ugyanez. *@
+        @if (HasMeta)
+        {
+            <div class="@($"m-mini-meta {(AllDone ? "all" : "")}")" aria-hidden="true">
+                @if (Task.ChecklistTotal > 0)
+                {
+                    <span><MudIcon Icon="@CheckIcon" /> @Task.ChecklistDone/@Task.ChecklistTotal</span>
+                }
+                @if (Task.StoryCount > 0)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.History" />
+                }
+            </div>
+        }
         <div class="m-card-actions">
             <button type="button" class="m-btn wide primary" title="Kész" disabled="@ReadOnly" @onclick="() => OnComplete.InvokeAsync(Task)">
                 <MudIcon Icon="@Icons.Material.Filled.Check" /><span>Kész</span>
@@ -45,6 +77,10 @@
 
     /// <summary>Minden kártya kap egy saját árnyalatot, így a sor „plakátjai” különböznek egymástól.</summary>
     private int Hue => Task.Id * 47 % 360;
+
+    private bool HasMeta => Task.ChecklistTotal > 0 || Task.StoryCount > 0;
+    private bool AllDone => Task.ChecklistTotal > 0 && Task.ChecklistDone == Task.ChecklistTotal;
+    private string CheckIcon => AllDone ? Icons.Material.Filled.CheckBox : Icons.Material.Outlined.CheckBox;
 
     // A „Task” név itt a paraméter, ezért a típust teljes névvel kell írni.
     private System.Threading.Tasks.Task Open() => ReadOnly ? System.Threading.Tasks.Task.CompletedTask : OnEdit.InvokeAsync(Task);

@@ -133,6 +133,97 @@ public class EndpointTests(ApiFixture fx)
         Assert.Equal(HttpStatusCode.NotFound, (await api.PostAsync($"api/tasks/{task.Id}/complete", null)).StatusCode);
     }
 
+    // ---------- Feladat-sztori: mini teendők és bejegyzések ----------
+
+    [Fact]
+    public async Task Minden_teendo_kipipalva_sem_zarja_le_a_feladatot()
+    {
+        var api = await fx.OwnerAsync();
+        var task = await api.Post<TaskDto>("api/tasks", TaskDto(Unique("Fürdőszoba felújítás")));
+        var a = await api.Post<ChecklistItemDto>($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto(" Csempe kiválasztása ", false));
+        var b = await api.Post<ChecklistItemDto>($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto("Burkoló hívása", false));
+        Assert.Equal("Csempe kiválasztása", a.Text);
+
+        await api.Put<ChecklistItemDto>($"api/tasks/{task.Id}/checklist/{a.Id}", new ChecklistItemEditDto(a.Text, true));
+        await api.Put<ChecklistItemDto>($"api/tasks/{task.Id}/checklist/{b.Id}", new ChecklistItemEditDto("Burkoló hívása (Domo)", true));
+
+        var open = (await api.Dashboard()).OpenTasks.Single(t => t.Id == task.Id);
+        Assert.Null(open.CompletedAt);
+        Assert.Equal((2, 2, 0), (open.ChecklistTotal, open.ChecklistDone, open.StoryCount));
+
+        var story = await api.Get<TaskStoryDto>($"api/tasks/{task.Id}/story");
+        Assert.Equal(["Csempe kiválasztása", "Burkoló hívása (Domo)"], story.Checklist.Select(i => i.Text));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await api.DeleteAsync($"api/tasks/{task.Id}/checklist/{a.Id}")).StatusCode);
+        Assert.Single((await api.Get<TaskStoryDto>($"api/tasks/{task.Id}/story")).Checklist);
+        await api.DeleteAsync($"api/tasks/{task.Id}");
+    }
+
+    [Fact]
+    public async Task Bejegyzesek_a_legujabb_elol_es_az_idopont_atirhato()
+    {
+        var api = await fx.OwnerAsync();
+        var task = await api.Post<TaskDto>("api/tasks", TaskDto(Unique("Kazán javítás")));
+        var monday = new DateTimeOffset(2026, 11, 9, 9, 30, 0, TimeSpan.FromHours(1));
+        var first = await api.Post<StoryEntryDto>($"api/tasks/{task.Id}/entries", new StoryEntryEditDto(monday, "Felhívtam a szerelőt"));
+        await api.Post<StoryEntryDto>($"api/tasks/{task.Id}/entries", new StoryEntryEditDto(monday.AddDays(2), "Kicserélte a szivattyút"));
+
+        var story = await api.Get<TaskStoryDto>($"api/tasks/{task.Id}/story");
+        Assert.Equal(["Kicserélte a szivattyút", "Felhívtam a szerelőt"], story.Entries.Select(e => e.Text));
+        Assert.Equal(monday, story.Entries[1].At);
+
+        // Az első bejegyzés időpontját a második utánra írjuk: előre kerül.
+        await api.Put<StoryEntryDto>($"api/tasks/{task.Id}/entries/{first.Id}", new StoryEntryEditDto(monday.AddDays(3), "Visszajött ellenőrizni"));
+        story = await api.Get<TaskStoryDto>($"api/tasks/{task.Id}/story");
+        Assert.Equal("Visszajött ellenőrizni", story.Entries[0].Text);
+        Assert.Equal(2, (await api.Dashboard()).OpenTasks.Single(t => t.Id == task.Id).StoryCount);
+        await api.DeleteAsync($"api/tasks/{task.Id}");
+    }
+
+    [Fact]
+    public async Task Kesz_feladat_teendoi_csak_olvashatok_es_a_torles_viszi_oket()
+    {
+        var api = await fx.OwnerAsync();
+        var task = await api.Post<TaskDto>("api/tasks", TaskDto(Unique("Költözés")));
+        var item = await api.Post<ChecklistItemDto>($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto("Dobozok", false));
+        await api.Post<StoryEntryDto>($"api/tasks/{task.Id}/entries", new StoryEntryEditDto(DateTimeOffset.UtcNow, "Szállító lefoglalva"));
+
+        var done = await api.Post<TaskDto>($"api/tasks/{task.Id}/complete");
+        Assert.Equal((1, 0, 1), (done.ChecklistTotal, done.ChecklistDone, done.StoryCount)); // nyitott teendővel is lezárható
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await api.PutAsJsonAsync($"api/tasks/{task.Id}/checklist/{item.Id}", new ChecklistItemEditDto("Dobozok", true))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await api.PostAsJsonAsync($"api/tasks/{task.Id}/entries", new StoryEntryEditDto(DateTimeOffset.UtcNow, "Késő"))).StatusCode);
+        Assert.Single((await api.Get<TaskStoryDto>($"api/tasks/{task.Id}/story")).Checklist); // olvasni lehet
+
+        await api.Post<TaskDto>($"api/tasks/{task.Id}/reopen");
+        await api.Put<ChecklistItemDto>($"api/tasks/{task.Id}/checklist/{item.Id}", new ChecklistItemEditDto("Dobozok", true));
+
+        await api.DeleteAsync($"api/tasks/{task.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, (await api.GetAsync($"api/tasks/{task.Id}/story")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Teendo_ervenytelen_bemenet_es_korlat()
+    {
+        var api = await fx.OwnerAsync();
+        var task = await api.Post<TaskDto>("api/tasks", TaskDto(Unique("Sok teendő")));
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await api.PostAsJsonAsync($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto("  ", false))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await api.PostAsJsonAsync($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto(new string('x', 201), false))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await api.PostAsJsonAsync($"api/tasks/{task.Id}/entries", new StoryEntryEditDto(DateTimeOffset.UtcNow, ""))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await api.PostAsJsonAsync("api/tasks/999999/checklist", new ChecklistItemEditDto("x", false))).StatusCode);
+
+        for (var i = 1; i <= 50; i++)
+            await api.Post<ChecklistItemDto>($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto($"#{i}", false));
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await api.PostAsJsonAsync($"api/tasks/{task.Id}/checklist", new ChecklistItemEditDto("#51", false))).StatusCode);
+        await api.DeleteAsync($"api/tasks/{task.Id}");
+    }
+
     // ---------- Ismétlődő: generálás ----------
 
     [Fact]

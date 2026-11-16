@@ -5,7 +5,8 @@
 
 <PageTitle>Szakik – Adam's family dashboard</PageTitle>
 
-@* Kezdőkép kereséssel és foglalkozás-gyorsszűrőkkel, alatta a szakik foglalkozásonként csoportosítva, kártyákon. *@
+@* Kezdőkép kereséssel és foglalkozás-gyorsszűrőkkel, alatta a szakik egyetlen rácsban, foglalkozás szerinti sorrendben
+   (foglalkozásonként jellemzően egy szaki van, a csoportcímek csak a helyet vinnék). *@
 <section class="hero sub-hero">
     <div class="hero-content">
         <div class="hero-kicker">Megbízható emberek</div>
@@ -59,50 +60,52 @@ else
     {
         <div class="sub-empty">Nincs ilyen foglalkozású szaki: „@_query”.</div>
     }
-    @foreach (var g in groups)
+    else
     {
-        <h2 class="sub-section">@g.Occupation <span class="m-count">@g.People.Count</span></h2>
         <div class="sz-grid">
-            @foreach (var t in g.People)
+            @foreach (var g in groups)
             {
-                <article class="sz-card" style="@($"--hue:{g.Hue}")">
-                    <MudIcon Icon="@g.Icon" Class="sz-art" aria-hidden="true" />
-                    <button type="button" class="sz-open" aria-label="@($"{t.Name} ({t.Occupation}) szerkesztése")" @onclick="() => Edit(t)"></button>
-                    <div class="sz-head">
-                        <div class="bd-avatar">@Format.Initials(t.Name)</div>
-                        <div class="sz-id">
-                            <div class="bd-name">@t.Name</div>
-                            <div class="sz-occ">@t.Occupation</div>
+                foreach (var t in g.People)
+                {
+                    <article class="sz-card" style="@($"--hue:{g.Hue}")">
+                        <MudIcon Icon="@g.Icon" Class="sz-art" aria-hidden="true" />
+                        <button type="button" class="sz-open" aria-label="@($"{t.Name} ({t.Occupation}) szerkesztése")" @onclick="() => Edit(t)"></button>
+                        <div class="sz-head">
+                            <div class="bd-avatar">@Format.Initials(t.Name)</div>
+                            <div class="sz-id">
+                                <div class="bd-name">@t.Name</div>
+                                <div class="sz-occ">@t.Occupation</div>
+                            </div>
                         </div>
-                    </div>
-                    @if (t.Phone is not null || t.Email is not null || t.Website is not null)
-                    {
-                        <div class="sz-contacts">
-                            @if (t.Phone is { } phone)
-                            {
-                                <a class="sz-link" href="@ContactLinks.PhoneHref(phone)" aria-label="@($"{t.Name} hívása: {phone}")">
-                                    <MudIcon Icon="@Icons.Material.Filled.Phone" /><span>@phone</span>
-                                </a>
-                            }
-                            @if (t.Email is { } email)
-                            {
-                                <a class="sz-link sz-iconic" href="@($"mailto:{email}")" aria-label="@($"E-mail {t.Name} részére: {email}")">
-                                    <MudIcon Icon="@Icons.Material.Filled.Email" /><span>@email</span>
-                                </a>
-                            }
-                            @if (t.Website is { } web && ContactLinks.WebsiteUrl(web) is { } url)
-                            {
-                                <a class="sz-link sz-iconic" href="@url" target="_blank" rel="noopener noreferrer" aria-label="@($"{t.Name} weboldala: {ContactLinks.WebsiteLabel(web)}")">
-                                    <MudIcon Icon="@Icons.Material.Filled.Language" /><span>@ContactLinks.WebsiteLabel(web)</span>
-                                </a>
-                            }
-                        </div>
-                    }
-                    @if (t.Notes is { } n)
-                    {
-                        <div class="sz-notes">@n</div>
-                    }
-                </article>
+                        @if (t.Phone is not null || t.Email is not null || t.Website is not null)
+                        {
+                            <div class="sz-contacts">
+                                @if (t.Phone is { } phone)
+                                {
+                                    <a class="sz-link" href="@ContactLinks.PhoneHref(phone)" aria-label="@($"{t.Name} hívása: {phone}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Phone" /><span>@phone</span>
+                                    </a>
+                                }
+                                @if (t.Email is { } email)
+                                {
+                                    <a class="sz-link sz-iconic" href="@($"mailto:{email}")" aria-label="@($"E-mail {t.Name} részére: {email}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Email" /><span>@email</span>
+                                    </a>
+                                }
+                                @if (t.Website is { } web && ContactLinks.WebsiteUrl(web) is { } url)
+                                {
+                                    <a class="sz-link sz-iconic" href="@url" target="_blank" rel="noopener noreferrer" aria-label="@($"{t.Name} weboldala: {ContactLinks.WebsiteLabel(web)}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Language" /><span>@ContactLinks.WebsiteLabel(web)</span>
+                                    </a>
+                                }
+                            </div>
+                        }
+                        @if (t.Notes is { } n)
+                        {
+                            <div class="sz-notes">@n</div>
+                        }
+                    </article>
+                }
             }
         </div>
     }

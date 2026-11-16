@@ -21,7 +21,35 @@ public class TaskItem
     /// <summary>Melyik esedékességhez (alkalomhoz) tartozik. A (sablon, alkalom) pár egyedi.</summary>
     public DateOnly? OccurrenceDate { get; set; }
 
+    /// <summary>Mini teendők (pipálható lista). Az utolsó kipipálása sem zárja le a feladatot.</summary>
+    public List<TaskChecklistItem> Checklist { get; set; } = [];
+
+    /// <summary>Időbélyeges, kézzel írt bejegyzések (a feladat „története”).</summary>
+    public List<TaskStoryEntry> Story { get; set; } = [];
+
     public bool IsOpen => CompletedAt is null;
+}
+
+public class TaskChecklistItem
+{
+    public int Id { get; set; }
+    public int TaskItemId { get; set; }
+    public required string Text { get; set; }
+    public bool IsDone { get; set; }
+
+    /// <summary>Sorrend a listán belül (az új a végére kerül).</summary>
+    public int Position { get; set; }
+}
+
+public class TaskStoryEntry
+{
+    public int Id { get; set; }
+    public int TaskItemId { get; set; }
+
+    /// <summary>A történés időpontja (alapból a felvétel pillanata, átírható). Eltolással tárolva, így a kliens helyi időben mutatja.</summary>
+    public DateTimeOffset At { get; set; }
+
+    public required string Text { get; set; }
 }
 
 public class RecurringTemplate

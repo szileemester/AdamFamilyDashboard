@@ -1,0 +1,168 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+@* Mini teendők: pipálás, átírás (a szövegre kattintva), törlés és új felvétele (Enterrel is). Minden azonnal mentődik.
+   Az utolsó kipipálása sem zárja le a feladatot: a haladássáv zöldre vált, a Kész gombot kézzel kell megnyomni. *@
+<div class="ck">
+    @* Felül a hozzáadás és a haladás (helyben marad), alatta a lista, csak az görget. *@
+    @if (!ReadOnly)
+    {
+        @if (Items.Count < TaskStoryLimits.ChecklistMaxItems)
+        {
+            <div class="ck-add">
+                <MudTextField @bind-Value="_newText" Placeholder="Új teendő…" MaxLength="TaskStoryLimits.ChecklistTextMax" Immediate="true" Margin="Margin.Dense"
+                              Variant="Variant.Outlined" OnKeyDown="AddKey" AutoFocus="@(Items.Count == 0)"
+                              UserAttributes="@(new() { ["aria-label"] = "Új teendő" })" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                           Disabled="@(string.IsNullOrWhiteSpace(_newText) || _busy)" OnClick="Add">Hozzáadás</MudButton>
+            </div>
+        }
+        else
+        {
+            <div class="ck-empty">Elérted a @TaskStoryLimits.ChecklistMaxItems teendős korlátot.</div>
+        }
+    }
+
+    @if (Items.Count > 0)
+    {
+        var done = Items.Count(i => i.IsDone);
+        <div class="@($"ck-progress {(done == Items.Count ? "all" : "")}")">
+            <div class="ck-bar" aria-hidden="true"><span style="@($"width:{done * 100 / Items.Count}%")"></span></div>
+            <span>@done / @Items.Count kész</span>
+        </div>
+    }
+    else if (ReadOnly)
+    {
+        <div class="ck-empty">Nincs teendő.</div>
+    }
+
+    <ul class="ck-list" @ref="_list">
+        @foreach (var item in Items)
+        {
+            <li class="@($"ck-item {(item.IsDone ? "done" : "")}")" @key="item.Id">
+                <MudCheckBox T="bool" Value="item.IsDone" ValueChanged="v => Toggle(item, v)" Disabled="ReadOnly" Color="Color.Success"
+                             Dense="true" UserAttributes="@(new() { ["aria-label"] = item.Text })" />
+                @if (_editId == item.Id)
+                {
+                    <MudTextField @bind-Value="_editText" MaxLength="TaskStoryLimits.ChecklistTextMax" Immediate="true" AutoFocus="true" Margin="Margin.Dense"
+                                  OnKeyDown="EditKey" Class="ck-edit" UserAttributes="@(new() { ["aria-label"] = "Teendő szövege" })" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary" aria-label="Mentés"
+                                   Disabled="string.IsNullOrWhiteSpace(_editText)" OnClick="SaveEdit" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Mégse" OnClick="() => _editId = null" />
+                }
+                else
+                {
+                    <button type="button" class="ck-text" disabled="@ReadOnly" title="@(ReadOnly ? null : "Átírás")" @onclick="() => StartEdit(item)">@item.Text</button>
+                    @if (!ReadOnly)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Class="ck-del" aria-label="@($"Törlés: {item.Text}")"
+                                       OnClick="() => Remove(item)" />
+                    }
+                }
+            </li>
+        }
+    </ul>
+</div>
+
+@code {
+
+    [Parameter, EditorRequired] public int TaskId { get; set; }
+
+    /// <summary>A szülő listája: a változások ebben is megjelennek (a fülcím számaihoz).</summary>
+    [Parameter, EditorRequired] public List<ChecklistItemDto> Items { get; set; } = [];
+
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string? _newText;
+    private int? _editId;
+    private string? _editText;
+    private bool _busy;
+    private ElementReference _list;
+    private bool _scrollToEnd;   // új teendő után a lista aljára (a render után)
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollToEnd) return;
+        _scrollToEnd = false;
+        await JS.InvokeVoidAsync("adaScrollToEnd", _list);
+    }
+
+    private async Task AddKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Add();
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(_newText) || _busy) return;
+        _busy = true;
+        try
+        {
+            var item = await Api.PostAsync<ChecklistItemDto>($"api/tasks/{TaskId}/checklist", new ChecklistItemEditDto(_newText.Trim(), false));
+            Items.Add(item);
+            _newText = null;
+            _scrollToEnd = true;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Toggle(ChecklistItemDto item, bool done)
+    {
+        // Azonnal látszik; hibánál visszaáll.
+        var index = Items.FindIndex(i => i.Id == item.Id);
+        if (index < 0) return;
+        Items[index] = item with { IsDone = done };
+        try
+        {
+            await Api.PutAsync<ChecklistItemDto>($"api/tasks/{TaskId}/checklist/{item.Id}", new ChecklistItemEditDto(item.Text, done));
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Items[index] = item;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private void StartEdit(ChecklistItemDto item)
+    {
+        if (ReadOnly) return;
+        _editId = item.Id;
+        _editText = item.Text;
+    }
+
+    private async Task EditKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SaveEdit();
+        else if (e.Key == "Escape") _editId = null;
+    }
+
+    private async Task SaveEdit()
+    {
+        var index = Items.FindIndex(i => i.Id == _editId);
+        if (index < 0 || string.IsNullOrWhiteSpace(_editText)) return;
+        var item = Items[index];
+        try
+        {
+            Items[index] = await Api.PutAsync<ChecklistItemDto>($"api/tasks/{TaskId}/checklist/{item.Id}", new ChecklistItemEditDto(_editText.Trim(), item.IsDone));
+            _editId = null;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Remove(ChecklistItemDto item)
+    {
+        try
+        {
+            await Api.DeleteAsync($"api/tasks/{TaskId}/checklist/{item.Id}");
+            Items.RemoveAll(i => i.Id == item.Id);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

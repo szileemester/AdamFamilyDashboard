@@ -137,7 +137,7 @@
         double Y(double t) => (1 - (t - lo) / range) * Band;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var points = string.Join(" ", hours.Select((h, i) => $"{(i * Cell + Cell / 2.0).ToString(inv)},{(Y(h.Temp) + 20).ToString("0.#", inv)}"));
-        <div class="ww-strip" style="@($"--cells:{hours.Count}")">
+        <div class="ww-strip" data-drag-scroll style="@($"--cells:{hours.Count}")">
             <svg class="ww-curve" width="@(hours.Count * Cell)" height="@(Band + 26)" aria-hidden="true">
                 <polyline points="@points" />
                 @foreach (var (h, i) in hours.Select((h, i) => (h, i)))

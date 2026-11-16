@@ -41,6 +41,7 @@ public static class Endpoints
         var open = await db.Tasks
             .Where(t => t.CompletedAt == null && (t.RecurringTemplateId == null || !deletedTemplateIds.Contains(t.RecurringTemplateId.Value)))
             .OrderBy(t => t.DueDate == null).ThenBy(t => t.DueDate).ThenBy(t => t.CreatedAt)
+            .Select(Mapping.TaskToDto)
             .ToListAsync(ct);
 
         var birthdays = BirthdayCalculator.Upcoming(await db.Birthdays.ToListAsync(ct), today, settings.BirthdayLookaheadDays)
@@ -54,7 +55,7 @@ public static class Endpoints
             .Select(t => new UpcomingMaintenanceDto(t.Id, t.Title, t.NextDueDate, t.NextDueDate.DayNumber - today.DayNumber))
             .ToList();
 
-        return new DashboardDto(today, open.Select(t => t.ToDto()).ToList(), birthdays, maintenance, settings.ToDto());
+        return new DashboardDto(today, open, birthdays, maintenance, settings.ToDto());
     }
 
     public static async Task GenerateOccurrencesAsync(AppDbContext db, AppClock clock, CancellationToken ct)
@@ -130,8 +131,7 @@ public static class Endpoints
         {
             var query = db.Tasks.Where(t => t.CompletedAt != null);
             if (!string.IsNullOrWhiteSpace(q)) query = query.Where(t => t.Title.Contains(q) || (t.Notes != null && t.Notes.Contains(q)));
-            var list = await query.OrderByDescending(t => t.CompletedAt).Take(200).ToListAsync(ct);
-            return list.Select(t => t.ToDto());
+            return await query.OrderByDescending(t => t.CompletedAt).Take(200).Select(Mapping.TaskToDto).ToListAsync(ct);
         });
 
         g.MapPost("/", async (TaskEditDto dto, AppDbContext db, AppClock clock, CancellationToken ct) =>
@@ -144,7 +144,7 @@ public static class Endpoints
             };
             db.Tasks.Add(task);
             await db.SaveChangesAsync(ct);
-            return Results.Ok(task.ToDto());
+            return Results.Ok(await TaskDtoAsync(db, task.Id, ct));
         });
 
         g.MapPut("/{id:int}", async (int id, TaskEditDto dto, AppDbContext db, CancellationToken ct) =>
@@ -159,7 +159,7 @@ public static class Endpoints
             task.DueDate = dto.DueDate;
             task.Icon = dto.Icon.Clean();
             await db.SaveChangesAsync(ct);
-            return Results.Ok(task.ToDto());
+            return Results.Ok(await TaskDtoAsync(db, task.Id, ct));
         });
 
         // Sima feladat kipipálása. Generált feladatnál az alapértelmezett (fix ütemezésű) következő dátummal zárja az alkalmat.
@@ -167,14 +167,14 @@ public static class Endpoints
         {
             var task = await db.Tasks.Include(t => t.RecurringTemplate).SingleOrDefaultAsync(t => t.Id == id, ct);
             if (task is null) return Results.NotFound();
-            if (!task.IsOpen) return Results.Ok(task.ToDto());
+            if (!task.IsOpen) return Results.Ok(await TaskDtoAsync(db, task.Id, ct));
 
             if (task.RecurringTemplate is { } template && template.NextDueDate == task.OccurrenceDate)
                 db.CompletionLog.Add(template.Complete(clock.Today, template.SuggestedFollowingDueDate(), null));
 
             task.CompletedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);
-            return Results.Ok(task.ToDto());
+            return Results.Ok(await TaskDtoAsync(db, task.Id, ct));
         });
 
         // Visszanyitás (a „Kész” visszavonása is ez). Generált feladatnál, ha ez volt a sablon utolsó teljesítése,
@@ -183,14 +183,16 @@ public static class Endpoints
         {
             var task = await db.Tasks.Include(t => t.RecurringTemplate).SingleOrDefaultAsync(t => t.Id == id, ct);
             if (task is null) return Results.NotFound();
-            if (task.IsOpen) return Results.Ok(task.ToDto());
+            if (task.IsOpen) return Results.Ok(await TaskDtoAsync(db, task.Id, ct));
             if (task.RecurringTemplate is { } template &&
                 await LastLogEntryAsync(db, template.Id, ct) is { } last && last.DueDate == task.OccurrenceDate)
                 await UndoCompletionAsync(db, template, last, ct);
             task.CompletedAt = null;
             await db.SaveChangesAsync(ct);
-            return Results.Ok(task.ToDto());
+            return Results.Ok(await TaskDtoAsync(db, task.Id, ct));
         });
+
+        MapTaskStory(g);
 
         // Törlés. Nyitott generált feladatnál = az alkalom kihagyása (a sablon továbblép, napló nélkül).
         g.MapDelete("/{id:int}", async (int id, AppDbContext db, CancellationToken ct) =>
@@ -204,6 +206,108 @@ public static class Endpoints
             return Results.NoContent();
         });
     }
+
+    private static Task<TaskDto> TaskDtoAsync(AppDbContext db, int id, CancellationToken ct) =>
+        db.Tasks.Where(t => t.Id == id).Select(Mapping.TaskToDto).SingleAsync(ct);
+
+    // ---------- Feladat-sztori: mini teendők és időbélyeges bejegyzések ----------
+
+    /// <summary>
+    /// A teendők és bejegyzések azonnal mentődnek (nem a feladat Mentés gombjával). Kész feladatnál csak olvashatók:
+    /// előbb vissza kell nyitni. Az utolsó teendő kipipálása sem zárja le a feladatot.
+    /// </summary>
+    private static void MapTaskStory(RouteGroupBuilder g)
+    {
+        g.MapGet("/{id:int}/story", async (int id, AppDbContext db, CancellationToken ct) =>
+        {
+            var items = await db.ChecklistItems.Where(i => i.TaskItemId == id).OrderBy(i => i.Position).ThenBy(i => i.Id).ToListAsync(ct);
+            var entries = await db.StoryEntries.Where(e => e.TaskItemId == id).OrderByDescending(e => e.At).ThenByDescending(e => e.Id).ToListAsync(ct);
+            // Csak üres listáknál kell külön megnézni, hogy a feladat egyáltalán létezik-e.
+            if (items.Count == 0 && entries.Count == 0 && !await db.Tasks.AnyAsync(t => t.Id == id, ct)) return Results.NotFound();
+            return Results.Ok(new TaskStoryDto(items.Select(i => i.ToDto()).ToList(), entries.Select(e => e.ToDto()).ToList()));
+        });
+
+        g.MapPost("/{id:int}/checklist", async (int id, ChecklistItemEditDto dto, AppDbContext db, CancellationToken ct) =>
+        {
+            if (Validate.ChecklistItem(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            // Egy lekérdezésben: nyitott-e a feladat, hány teendője van, és mi az utolsó pozíció.
+            var state = await db.Tasks.Where(t => t.Id == id)
+                .Select(t => new { Open = t.CompletedAt == null, Count = t.Checklist.Count, Last = t.Checklist.Max(i => (int?)i.Position) })
+                .SingleOrDefaultAsync(ct);
+            if (EditableTaskError(state?.Open) is { } error) return error;
+            if (state!.Count >= Validate.ChecklistMaxItems)
+                return Problem("Text", $"Egy feladaton legfeljebb {Validate.ChecklistMaxItems} teendő lehet.");
+            var item = new TaskChecklistItem { TaskItemId = id, Text = dto.Text.Trim(), IsDone = dto.IsDone, Position = (state.Last ?? 0) + 1 };
+            db.ChecklistItems.Add(item);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(item.ToDto());
+        });
+
+        g.MapPut("/{id:int}/checklist/{itemId:int}", async (int id, int itemId, ChecklistItemEditDto dto, AppDbContext db, CancellationToken ct) =>
+        {
+            if (Validate.ChecklistItem(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            if (await EditableTaskErrorAsync(db, id, ct) is { } error) return error;
+            var item = await db.ChecklistItems.SingleOrDefaultAsync(i => i.Id == itemId && i.TaskItemId == id, ct);
+            if (item is null) return Results.NotFound();
+            item.Text = dto.Text.Trim();
+            item.IsDone = dto.IsDone;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(item.ToDto());
+        });
+
+        g.MapDelete("/{id:int}/checklist/{itemId:int}", async (int id, int itemId, AppDbContext db, CancellationToken ct) =>
+        {
+            if (await EditableTaskErrorAsync(db, id, ct) is { } error) return error;
+            var deleted = await db.ChecklistItems.Where(i => i.Id == itemId && i.TaskItemId == id).ExecuteDeleteAsync(ct);
+            return deleted == 0 ? Results.NotFound() : Results.NoContent();
+        });
+
+        g.MapPost("/{id:int}/entries", async (int id, StoryEntryEditDto dto, AppDbContext db, CancellationToken ct) =>
+        {
+            if (Validate.StoryEntry(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            if (await EditableTaskErrorAsync(db, id, ct) is { } error) return error;
+            var entry = new TaskStoryEntry { TaskItemId = id, At = dto.At, Text = dto.Text.Trim() };
+            db.StoryEntries.Add(entry);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(entry.ToDto());
+        });
+
+        g.MapPut("/{id:int}/entries/{entryId:int}", async (int id, int entryId, StoryEntryEditDto dto, AppDbContext db, CancellationToken ct) =>
+        {
+            if (Validate.StoryEntry(dto) is { Count: > 0 } errors) return Results.ValidationProblem(errors);
+            if (await EditableTaskErrorAsync(db, id, ct) is { } error) return error;
+            var entry = await db.StoryEntries.SingleOrDefaultAsync(e => e.Id == entryId && e.TaskItemId == id, ct);
+            if (entry is null) return Results.NotFound();
+            entry.At = dto.At;
+            entry.Text = dto.Text.Trim();
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(entry.ToDto());
+        });
+
+        g.MapDelete("/{id:int}/entries/{entryId:int}", async (int id, int entryId, AppDbContext db, CancellationToken ct) =>
+        {
+            if (await EditableTaskErrorAsync(db, id, ct) is { } error) return error;
+            var deleted = await db.StoryEntries.Where(e => e.Id == entryId && e.TaskItemId == id).ExecuteDeleteAsync(ct);
+            return deleted == 0 ? Results.NotFound() : Results.NoContent();
+        });
+    }
+
+    /// <summary>Null, ha a feladat létezik és nyitott; különben a megfelelő hibaválasz.</summary>
+    private static async Task<IResult?> EditableTaskErrorAsync(AppDbContext db, int id, CancellationToken ct) =>
+        EditableTaskError(await db.Tasks.Where(t => t.Id == id).Select(t => (bool?)(t.CompletedAt == null)).SingleOrDefaultAsync(ct));
+
+    /// <summary>A feladat nyitottsága alapján (null = nincs ilyen feladat).</summary>
+    private static IResult? EditableTaskError(bool? open) => open switch
+    {
+        null => Results.NotFound(),
+        false => Problem("Task", "Kész feladat nem módosítható; előbb nyisd vissza."),
+        true => null,
+    };
+
+    private const string OccurrenceTaken = "Erre a napra már van egy alkalom ennél a feladatnál. Válassz másik dátumot.";
+
+    private static IResult Problem(string field, string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [message] });
 
     // ---------- Ismétlődő sablonok ----------
 
@@ -239,8 +343,7 @@ public static class Endpoints
             var dateChanged = oldDue != dto.NextDueDate;
             // Erre a napra már volt (pl. teljesített) alkalom: az egyedi index miatt nem lehet még egy.
             if (dateChanged && await db.Tasks.AnyAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == dto.NextDueDate, ct))
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                    { ["NextDueDate"] = ["Erre a napra már van egy alkalom ennél a feladatnál. Válassz másik dátumot."] });
+                return Problem("NextDueDate", OccurrenceTaken);
 
             t.Title = dto.Title.Trim();
             t.Notes = dto.Notes.Clean();
@@ -304,10 +407,9 @@ public static class Endpoints
             var t = await db.RecurringTemplates.FindAsync([id], ct);
             if (t is null) return Results.NotFound();
             if (dto.NextDueDate <= t.NextDueDate)
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["NextDueDate"] = ["A következő esedékesség legyen későbbi a mostaninál."] });
+                return Problem("NextDueDate", "A következő esedékesség legyen későbbi a mostaninál.");
             if (await db.Tasks.AnyAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == dto.NextDueDate, ct))
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                    { ["NextDueDate"] = ["Erre a napra már van egy alkalom ennél a feladatnál. Válassz másik dátumot."] });
+                return Problem("NextDueDate", OccurrenceTaken);
 
             var due = t.NextDueDate;
             var openTask = await db.Tasks.SingleOrDefaultAsync(x => x.RecurringTemplateId == id && x.OccurrenceDate == due && x.CompletedAt == null, ct);

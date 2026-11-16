@@ -53,6 +53,33 @@ public static class Format
         Budapest is null ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
                          : TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Budapest);
 
+    /// <summary>Eltolásos időpont budapesti helyi időben.</summary>
+    public static DateTime ToLocal(DateTimeOffset at) =>
+        Budapest is null ? at.LocalDateTime : TimeZoneInfo.ConvertTime(at, Budapest).DateTime;
+
+    /// <summary>Budapesti helyi idő (pl. a dátum- és időválasztóból) eltolással, a szervernek.</summary>
+    public static DateTimeOffset FromLocal(DateTime local)
+    {
+        var wall = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        return new DateTimeOffset(wall, Budapest?.GetUtcOffset(wall) ?? TimeZoneInfo.Local.GetUtcOffset(wall));
+    }
+
+    /// <summary>„ma 14:32”, „tegnap 9:05”, idén „nov. 3. 14:32”, egyébként „2025. nov. 3. 14:32”.</summary>
+    public static string Stamp(DateTimeOffset at) => Stamp(ToLocal(at));
+
+    /// <inheritdoc cref="Stamp(DateTimeOffset)"/>
+    public static string Stamp(DateTime local)
+    {
+        var ago = Today.DayNumber - DateOnly.FromDateTime(local).DayNumber;
+        var day = ago switch
+        {
+            <= 0 => "ma",
+            1 => "tegnap",
+            _ => local.ToString(local.Year == Today.Year ? "MMM d." : "yyyy. MMM d."),
+        };
+        return $"{day} {local:H:mm}";
+    }
+
     public static string Date(DateOnly d) => d.ToString("yyyy. MM. dd.");
 
     public static string Relative(int days) => days switch

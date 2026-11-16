@@ -4,6 +4,8 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 
 - **Eisenhower mátrix**: kézi fontos/sürgős jelölés, opcionális határidő. 2×2 panel kártyákkal: desktopon drag & drop,
   telefonon tömör mini-kártyák, hosszú nyomásos húzással. A „Kész” visszavonható; a kész feladatok kereshetők.
+  Minden feladathoz mini teendők (pipálható lista) és időbélyeges „történet” bejegyzések vehetők fel; ezek azonnal
+  mentődnek, és az utolsó teendő kipipálása sem zárja le a feladatot. Kész feladatnál csak olvashatók.
 - **Ritka ismétlődő feladatok** (olajcsere, kazán): „N havonta”, fix ütemezés horgonydátumból. Esedékesség előtt
   `LeadDays` nappal (alapból 14) automatikusan bekerül a mátrixba. Teljesítési naplót vezet (dátum + megjegyzés).
   Generált feladat törlése = az alkalom kihagyása.
@@ -11,7 +13,7 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 - **Időjárás**: Open-Meteo (kulcs nélkül), egy beállítható helyszín. A kezdőképen ma + 2 nap; kattintásra heti
   előrejelzés, naponként lenyíló órás bontással.
 - **Szakik**: megbízható szakemberek (foglalkozás, név, telefon, e-mail, weboldal, megjegyzés) kártyákon,
-  foglalkozásonként csoportosítva. Keresés foglalkozásra (ékezet nélkül is), gyorsszűrő gombokkal.
+  foglalkozás szerinti sorrendben. Keresés foglalkozásra (ékezet nélkül is), gyorsszűrő gombokkal.
 - **Témák**: Piros és Kék (mozgó háttér), Sötét és Világos (statikus). Eszközönként tárolódik.
 
 ## Felépítés

@@ -61,7 +61,7 @@ else
                         </div>
                         <div class="rp-title">@t.Title</div>
                         <div class="rp-meta">
-                            <span title="Befejezve"><MudIcon Icon="@Icons.Material.Outlined.TaskAlt" /> @DoneText(t)</span>
+                            <span title="Befejezve"><MudIcon Icon="@Icons.Material.Outlined.TaskAlt" /> @Format.Stamp(Format.ToLocal(t.CompletedAt ?? t.CreatedAt))</span>
                             @if (t.DueDate is { } due)
                             {
                                 <span title="Határidő" class="@(due < DoneOn(t) ? "dn-late" : "")"><MudIcon Icon="@Icons.Material.Outlined.Event" /> @Format.Date(due)</span>
@@ -69,6 +69,13 @@ else
                         </div>
                     </div>
                     <div class="rp-actions">
+                        @if (t.ChecklistTotal > 0 || t.StoryCount > 0)
+                        {
+                            @* A teendők és a történet csak olvashatóan; szerkeszteni visszanyitás után lehet. *@
+                            <button type="button" class="m-btn" title="Teendők és történet" aria-label="Teendők és történet" @onclick="() => Show(t)">
+                                <MudIcon Icon="@Icons.Material.Filled.History" />
+                            </button>
+                        }
                         <button type="button" class="m-btn wide" title="Visszanyitás: visszakerül a mátrixba" @onclick="() => Reopen(t)">
                             <MudIcon Icon="@Icons.Material.Filled.Undo" /><span>Visszanyitás</span>
                         </button>
@@ -104,14 +111,6 @@ else
     }
 
     /// <summary>„ma 14:32”, „tegnap 9:05”, egyébként „nov. 3. 14:32”.</summary>
-    private static string DoneText(TaskDto t)
-    {
-        var at = Format.ToLocal(t.CompletedAt ?? t.CreatedAt);
-        var ago = Format.Today.DayNumber - DateOnly.FromDateTime(at).DayNumber;
-        var day = ago switch { <= 0 => "ma", 1 => "tegnap", _ => at.ToString(at.Year == Format.Today.Year ? "MMM d." : "yyyy. MMM d.") };
-        return $"{day} {at:HH:mm}";
-    }
-
     protected override Task OnInitializedAsync()
     {
         Undo.Undone += OnUndone;
@@ -146,6 +145,8 @@ else
             _items ??= [];
         }
     }
+
+    private Task Show(TaskDto t) => TaskEditDialog.ShowAsync(Dialogs, t);
 
     private async Task Reopen(TaskDto t)
     {

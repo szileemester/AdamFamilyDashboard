@@ -7,6 +7,8 @@ namespace AdaManagement.Server.Data;
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options), IDataProtectionKeyContext
 {
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
+    public DbSet<TaskChecklistItem> ChecklistItems => Set<TaskChecklistItem>();
+    public DbSet<TaskStoryEntry> StoryEntries => Set<TaskStoryEntry>();
     public DbSet<RecurringTemplate> RecurringTemplates => Set<RecurringTemplate>();
     public DbSet<CompletionLogEntry> CompletionLog => Set<CompletionLogEntry>();
     public DbSet<Birthday> Birthdays => Set<Birthday>();
@@ -28,7 +30,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .IsUnique()
                 .HasFilter("[RecurringTemplateId] IS NOT NULL AND [OccurrenceDate] IS NOT NULL");
             e.HasIndex(x => x.CompletedAt);
+            // A feladattal együtt törlődnek (adatbázis-szinten is, így a tömeges törlésnél is).
+            e.HasMany(x => x.Checklist).WithOne().HasForeignKey(x => x.TaskItemId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Story).WithOne().HasForeignKey(x => x.TaskItemId).OnDelete(DeleteBehavior.Cascade);
         });
+
+        b.Entity<TaskChecklistItem>().Property(x => x.Text).HasMaxLength(Api.Validate.ChecklistTextMax);
+        b.Entity<TaskStoryEntry>().Property(x => x.Text).HasMaxLength(Api.Validate.StoryTextMax);
 
         b.Entity<RecurringTemplate>(e =>
         {

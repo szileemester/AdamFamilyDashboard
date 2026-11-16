@@ -1,0 +1,151 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@* A feladat története: kézzel írt, időbélyeges bejegyzések, a legújabb felül. Az időpont alapból a felvétel pillanata,
+   de átírható (pl. utólag rögzített hívás). Minden azonnal mentődik. *@
+<div class="st">
+    @if (!ReadOnly)
+    {
+        <div class="st-new">
+            <MudTextField @bind-Value="_text" Label="Mi történt?" Lines="2" Sizing="InputSizing.Auto" MaxLines="6" MaxLength="TaskStoryLimits.StoryTextMax"
+                          Immediate="true" Variant="Variant.Outlined" AutoFocus="@(Entries.Count == 0)" />
+            <div class="st-when">
+                <MudDatePicker Date="_date" DateChanged="d => { _date = d; _touched = true; }" Label="Dátum" DateFormat="yyyy.MM.dd"
+                               Editable="true" Margin="Margin.Dense" />
+                <MudTimePicker Time="_time" TimeChanged="t => { _time = t; _touched = true; }" Label="Idő" AmPm="false"
+                               Editable="true" Margin="Margin.Dense" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                           Disabled="@(string.IsNullOrWhiteSpace(_text) || _busy)" OnClick="Add">Hozzáadás</MudButton>
+            </div>
+        </div>
+    }
+
+    @* Csak a bejegyzések listája görget; az új bejegyzés mezői felül helyben maradnak. *@
+    <div class="st-scroll">
+    @if (Entries.Count == 0)
+    {
+        <div class="ck-empty">Még nincs bejegyzés.</div>
+    }
+    <ol class="st-list">
+        @foreach (var e in Entries)
+        {
+            <li class="st-entry" @key="e.Id">
+                @if (_editId == e.Id)
+                {
+                    <MudTextField @bind-Value="_editText" Lines="2" Sizing="InputSizing.Auto" MaxLines="6" MaxLength="TaskStoryLimits.StoryTextMax" Immediate="true"
+                                  AutoFocus="true" Variant="Variant.Outlined" UserAttributes="@(new() { ["aria-label"] = "Bejegyzés szövege" })" />
+                    <div class="st-when edit">
+                        <MudDatePicker @bind-Date="_editDate" Label="Dátum" DateFormat="yyyy.MM.dd" Editable="true" Margin="Margin.Dense" />
+                        <MudTimePicker @bind-Time="_editTime" Label="Idő" AmPm="false" Editable="true" Margin="Margin.Dense" />
+                        <MudButton OnClick="() => _editId = null">Mégse</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveEdit"
+                                   Disabled="@(string.IsNullOrWhiteSpace(_editText) || _editDate is null || _editTime is null)">Mentés</MudButton>
+                    </div>
+                }
+                else
+                {
+                    <div class="st-head">
+                        <time class="st-at" datetime="@e.At.ToString("o")">@Format.Stamp(e.At)</time>
+                        @if (!ReadOnly)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" aria-label="Szerkesztés" OnClick="() => StartEdit(e)" />
+                            <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" aria-label="Törlés" OnClick="() => Remove(e)" />
+                        }
+                    </div>
+                    <div class="st-text">@e.Text</div>
+                }
+            </li>
+        }
+    </ol>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int TaskId { get; set; }
+
+    /// <summary>A szülő listája (a legújabb elöl): a változások ebben is megjelennek.</summary>
+    [Parameter, EditorRequired] public List<StoryEntryDto> Entries { get; set; } = [];
+
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string? _text;
+    private DateTime? _date;
+    private TimeSpan? _time;
+    private bool _touched;   // ha az időpontot nem írták át, a mentés pillanata számít
+    private bool _busy;
+
+    private int? _editId;
+    private string? _editText;
+    private DateTime? _editDate;
+    private TimeSpan? _editTime;
+
+    protected override void OnInitialized() => ResetWhen();
+
+    private void ResetWhen()
+    {
+        (_date, _time) = Split(Format.Now);
+        _touched = false;
+    }
+
+    /// <summary>Helyi időpont → (nap, óra:perc) a dátum- és időválasztóhoz.</summary>
+    private static (DateTime Date, TimeSpan Time) Split(DateTime local) => (local.Date, new TimeSpan(local.Hour, local.Minute, 0));
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(_text) || _busy) return;
+        _busy = true;
+        try
+        {
+            var at = _touched && _date is { } d && _time is { } t ? Format.FromLocal(d.Date + t) : DateTimeOffset.UtcNow;
+            var entry = await Api.PostAsync<StoryEntryDto>($"api/tasks/{TaskId}/entries", new StoryEntryEditDto(at, _text.Trim()));
+            Entries.Add(entry);
+            Sort();
+            _text = null;
+            ResetWhen();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private void StartEdit(StoryEntryDto e)
+    {
+        _editId = e.Id;
+        _editText = e.Text;
+        (_editDate, _editTime) = Split(Format.ToLocal(e.At));
+    }
+
+    private async Task SaveEdit()
+    {
+        var index = Entries.FindIndex(x => x.Id == _editId);
+        if (index < 0 || string.IsNullOrWhiteSpace(_editText) || _editDate is not { } d || _editTime is not { } t) return;
+        var e = Entries[index];
+        // Ha az időpont nem változott, a másodpercek is maradnak (különben a sorrend megbillenhetne).
+        var at = (d.Date, t) == Split(Format.ToLocal(e.At)) ? e.At : Format.FromLocal(d.Date + t);
+        try
+        {
+            Entries[index] = await Api.PutAsync<StoryEntryDto>($"api/tasks/{TaskId}/entries/{e.Id}", new StoryEntryEditDto(at, _editText.Trim()));
+            Sort();
+            _editId = null;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Remove(StoryEntryDto e)
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Bejegyzés törlése", "Biztosan törlöd ezt a bejegyzést?", yesText: "Törlés", cancelText: "Mégse") != true) return;
+        try
+        {
+            await Api.DeleteAsync($"api/tasks/{TaskId}/entries/{e.Id}");
+            Entries.RemoveAll(x => x.Id == e.Id);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    /// <summary>A legújabb elöl, mint a szervernél.</summary>
+    private void Sort() => Entries.Sort((a, b) => b.At != a.At ? b.At.CompareTo(a.At) : b.Id.CompareTo(a.Id));
+}

@@ -2,61 +2,48 @@
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
 
-<MudDialog>
+@* Feladat ablaka három füllel: Adatok (a Mentés gombbal mentődik), Teendők és Történet (ezek azonnal mentődnek).
+   Új feladatnál a Teendők és a Történet az első mentés után érhető el. Kész feladatnál minden csak olvasható.
+   Telefonon az ablak teljes képernyős (CSS: .task-dialog). *@
+<MudDialog Class="task-dialog">
     <DialogContent>
-        <MudTextField @bind-Value="_title" Label="Feladat" Required="true" RequiredError="Add meg, mi a feladat." MaxLength="200" AutoFocus="true" Immediate="true" />
-        @* Fontos / sürgős: két, teljes szélességet kitöltő kapcsológomb közvetlenül a feladat alatt. *@
-        <div class="flag-toggles">
-            <button type="button" class="@($"flag-toggle {(_important ? "on-important" : "")}")" aria-pressed="@_important"
-                    @onclick="() => _important = !_important">
-                <MudIcon Icon="@(_important ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarOutline)" /> Fontos
-            </button>
-            <button type="button" class="@($"flag-toggle {(_urgent ? "on-urgent" : "")}")" aria-pressed="@_urgent"
-                    @onclick="() => _urgent = !_urgent">
-                <MudIcon Icon="@(_urgent ? Icons.Material.Filled.Bolt : Icons.Material.Outlined.Bolt)" /> Sürgős
-            </button>
-        </div>
-        <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="3" MaxLength="2000" />
-        <MudDatePicker @bind-Date="_due" Label="Határidő (opcionális)" Clearable="true" Editable="true" DateFormat="yyyy.MM.dd" />
-
-        @* Kártya háttérikonja: „Auto” = a címből kitalált (élőben frissül), vagy kézzel választott. *@
-        <div class="icon-pick-label">
-            Ikon <span>@(_icon is null ? $"· automatikus ({AutoLabel})" : $"· {TaskIcons.ByKey(_icon)?.Label}")</span>
-        </div>
-        <div class="icon-pick" role="radiogroup" aria-label="Ikon">
-            <button type="button" class="@($"icon-opt auto {(_icon is null ? "on" : "")}")" title="Automatikus a cím alapján"
-                    role="radio" aria-checked="@(_icon is null ? "true" : "false")" tabindex="@(_icon is null ? 0 : -1)" aria-label="Automatikus ikon" @onclick="() => _icon = null">
-                <MudIcon Icon="@AutoIcon" /><span class="auto-tag">auto</span>
-            </button>
-            @foreach (var i in TaskIcons.All)
-            {
-                <button type="button" class="@($"icon-opt {(_icon == i.Key ? "on" : "")}")" title="@i.Label"
-                        role="radio" aria-checked="@(_icon == i.Key ? "true" : "false")" tabindex="@(_icon == i.Key ? 0 : -1)" aria-label="@i.Label" @onclick="() => _icon = i.Key">
-                    <MudIcon Icon="@i.Icon" />
-                </button>
-            }
-        </div>
-        @if (Task?.RecurringTemplateId is not null)
-        {
-            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Ismétlődő feladatból generálva. A törlés az alkalom kihagyását jelenti.</MudAlert>
-        }
+        <MudTabs @bind-ActivePanelIndex="_tab" MinimumTabWidth="0px" Elevation="0" ApplyEffectsToContainer="true" TabPanelsClass="pt-2" Class="task-tabs">
+            <MudTabPanel Text="Adatok"><div class="tab-scroll">@Details</div></MudTabPanel>
+            <MudTabPanel Text="@ChecklistTitle" Disabled="@(Task is null)" ToolTip="@AfterSaveTip">
+                @Loaded(@<ChecklistPanel TaskId="Task!.Id" Items="_story!.Checklist" ReadOnly="ReadOnly" OnChanged="StoryChanged" />)
+            </MudTabPanel>
+            <MudTabPanel Text="@StoryTitle" Disabled="@(Task is null)" ToolTip="@AfterSaveTip">
+                @Loaded(@<StoryPanel TaskId="Task!.Id" Entries="_story!.Entries" ReadOnly="ReadOnly" OnChanged="StoryChanged" />)
+            </MudTabPanel>
+        </MudTabs>
     </DialogContent>
     <DialogActions>
-        @if (Task is not null)
+        @if (ReadOnly)
         {
-            <MudButton Color="Color.Error" OnClick="Delete" StartIcon="@Icons.Material.Filled.Delete">
-                @(Task.RecurringTemplateId is null ? "Törlés" : "Kihagyás")
-            </MudButton>
+            <MudSpacer />
+            <MudButton OnClick="() => MudDialog.Cancel()">Bezárás</MudButton>
         }
-        <MudSpacer />
-        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="string.IsNullOrWhiteSpace(_title) || _busy">Mentés</MudButton>
+        else
+        {
+            @if (Task is not null)
+            {
+                <MudButton Color="Color.Error" OnClick="Delete" StartIcon="@Icons.Material.Filled.Delete">
+                    @(Task.RecurringTemplateId is null ? "Törlés" : "Kihagyás")
+                </MudButton>
+            }
+            <MudSpacer />
+            <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="string.IsNullOrWhiteSpace(_title) || _busy">Mentés</MudButton>
+        }
     </DialogActions>
 </MudDialog>
 
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public TaskDto? Task { get; set; }
+
+    /// <summary>Hívódik, ha egy teendő vagy bejegyzés azonnal elmentődött (a hívó Mégse után is frissít).</summary>
+    [Parameter] public Action? OnStoryChanged { get; set; }
 
     private string? _title;
     private string? _notes;
@@ -65,20 +52,44 @@
     private bool _urgent;
     private bool _busy;
     private string? _icon;   // null = automatikus
+    private int _tab;
+    private TaskStoryDto? _story;
+
+    /// <summary>Kész feladat: csak olvasható (a Kész listából nyitva). Visszanyitás után szerkeszthető.</summary>
+    private bool ReadOnly => Task?.CompletedAt is not null;
 
     private TaskIcon? Guessed => TaskIcons.Guess(_title);
     private string AutoIcon => Guessed?.Icon ?? Quadrants.Of(_important, _urgent).FlagIcons.Last();
     private string AutoLabel => Guessed?.Label ?? "a negyed ikonja";
 
+    private string ChecklistTitle => _story is { Checklist.Count: > 0 } s
+        ? $"Teendők {s.Checklist.Count(i => i.IsDone)}/{s.Checklist.Count}"
+        : "Teendők";
+
+    private string? AfterSaveTip => Task is null ? "Az első mentés után" : null;
+
+    /// <summary>A Teendők és a Történet fül tartalma: amíg a sztori töltődik, csak egy csík.</summary>
+    private RenderFragment Loaded(RenderFragment body) => _story is null
+        ? @<MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        : body;
+
+    private string StoryTitle => _story is { Entries.Count: > 0 } s ? $"Történet ({s.Entries.Count})" : "Történet";
+
     public static async Task<bool> ShowAsync(IDialogService dialogs, TaskDto? task)
     {
-        var parameters = new DialogParameters<TaskEditDialog> { { x => x.Task, task } };
-        var dialog = await dialogs.ShowAsync<TaskEditDialog>(task is null ? "Új feladat" : "Feladat szerkesztése", parameters);
+        var storyChanged = false;
+        var parameters = new DialogParameters<TaskEditDialog>
+        {
+            { x => x.Task, task },
+            { x => x.OnStoryChanged, () => storyChanged = true },
+        };
+        var title = task is null ? "Új feladat" : task.CompletedAt is null ? "Feladat" : "Kész feladat";
+        var dialog = await dialogs.ShowAsync<TaskEditDialog>(title, parameters);
         var result = await dialog.Result;
-        return result is { Canceled: false };
+        return result is { Canceled: false } || storyChanged;
     }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         if (Task is null) return;
         _title = Task.Title;
@@ -87,7 +98,68 @@
         _important = Task.IsImportant;
         _urgent = Task.IsUrgent;
         _icon = TaskIcons.ByKey(Task.Icon)?.Key;
+        // Ha már van teendő vagy bejegyzés, az a lényeg: a Teendők fül nyílik (vagy a Történet, ha csak az van).
+        _tab = Task.ChecklistTotal > 0 ? 1 : Task.StoryCount > 0 ? 2 : 0;
+
+        // Se teendő, se bejegyzés: nincs mit lekérni.
+        if (Task.ChecklistTotal == 0 && Task.StoryCount == 0) { _story = new([], []); return; }
+        try { _story = await Api.GetAsync<TaskStoryDto>($"api/tasks/{Task.Id}/story"); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _story = new([], []); }
     }
+
+    private void StoryChanged()
+    {
+        OnStoryChanged?.Invoke();
+        StateHasChanged(); // a fülcímek számai
+    }
+
+    private RenderFragment Details => __builder =>
+    {
+        <MudTextField @bind-Value="_title" Label="Feladat*" MaxLength="200"
+                      AutoFocus="@(Task is null)" Immediate="true" ReadOnly="ReadOnly" />
+        @* Fontos / sürgős: két, teljes szélességet kitöltő kapcsológomb közvetlenül a feladat alatt. *@
+        <div class="flag-toggles">
+            <button type="button" class="@($"flag-toggle {(_important ? "on-important" : "")}")" aria-pressed="@_important" disabled="@ReadOnly"
+                    @onclick="() => _important = !_important">
+                <MudIcon Icon="@(_important ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarOutline)" /> Fontos
+            </button>
+            <button type="button" class="@($"flag-toggle {(_urgent ? "on-urgent" : "")}")" aria-pressed="@_urgent" disabled="@ReadOnly"
+                    @onclick="() => _urgent = !_urgent">
+                <MudIcon Icon="@(_urgent ? Icons.Material.Filled.Bolt : Icons.Material.Outlined.Bolt)" /> Sürgős
+            </button>
+        </div>
+        <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="3" MaxLength="2000" ReadOnly="ReadOnly" />
+        <MudDatePicker @bind-Date="_due" Label="Határidő (opcionális)" Clearable="@(!ReadOnly)" Editable="true" DateFormat="yyyy.MM.dd" ReadOnly="ReadOnly" />
+
+        @if (!ReadOnly)
+        {
+            @* Kártya háttérikonja: „Auto” = a címből kitalált (élőben frissül), vagy kézzel választott. *@
+            <div class="icon-pick-label">
+                Ikon <span>@(_icon is null ? $"· automatikus ({AutoLabel})" : $"· {TaskIcons.ByKey(_icon)?.Label}")</span>
+            </div>
+            <div class="icon-pick" role="radiogroup" aria-label="Ikon">
+                <button type="button" class="@($"icon-opt auto {(_icon is null ? "on" : "")}")" title="Automatikus a cím alapján"
+                        role="radio" aria-checked="@(_icon is null ? "true" : "false")" tabindex="@(_icon is null ? 0 : -1)" aria-label="Automatikus ikon" @onclick="() => _icon = null">
+                    <MudIcon Icon="@AutoIcon" /><span class="auto-tag">auto</span>
+                </button>
+                @foreach (var i in TaskIcons.All)
+                {
+                    <button type="button" class="@($"icon-opt {(_icon == i.Key ? "on" : "")}")" title="@i.Label"
+                            role="radio" aria-checked="@(_icon == i.Key ? "true" : "false")" tabindex="@(_icon == i.Key ? 0 : -1)" aria-label="@i.Label" @onclick="() => _icon = i.Key">
+                        <MudIcon Icon="@i.Icon" />
+                    </button>
+                }
+            </div>
+        }
+        @if (Task?.RecurringTemplateId is not null && !ReadOnly)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Ismétlődő feladatból generálva. A törlés az alkalom kihagyását jelenti.</MudAlert>
+        }
+        @if (ReadOnly)
+        {
+            <MudAlert Severity="Severity.Success" Dense="true" Class="mt-2">Kész feladat. Szerkeszteni a visszanyitása után lehet.</MudAlert>
+        }
+    };
 
     private async Task Save()
     {
@@ -106,7 +178,7 @@
     private async Task Delete()
     {
         var question = Task!.RecurringTemplateId is null
-            ? "Biztosan törlöd a feladatot?"
+            ? "Biztosan törlöd a feladatot? A teendői és a története is törlődik."
             : "Kihagyod ezt az alkalmat? Az ismétlődő feladat a következő esedékességre lép, napló nélkül.";
         if (await Dialogs.ShowMessageBoxAsync("Megerősítés", question, yesText: "Igen", cancelText: "Mégse") != true) return;
         try

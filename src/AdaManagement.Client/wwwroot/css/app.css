@@ -109,6 +109,7 @@ h1:focus {
     position: relative; display: flex; overflow-x: auto; overscroll-behavior-x: contain;
     margin: 0 6px; padding: 2px 0 8px; scrollbar-width: thin;
 }
+@media (pointer: fine) { [data-drag-scroll] { cursor: grab; } [data-drag-scroll].dragging { cursor: grabbing; user-select: none; } }
 .ww-hour { flex: 0 0 46px; display: flex; flex-direction: column; align-items: center; font-variant-numeric: tabular-nums; }
 .ww-h-time { height: 16px; font-size: .72rem; color: var(--mud-palette-text-secondary); }
 .ww-h-icon { height: 26px; font-size: 1.15rem; line-height: 26px; }
@@ -140,6 +141,65 @@ h1:focus {
     .ww-icon { font-size: 1.4rem; }
     .ww-temps { grid-column: 1 / -1; }
     .ww-min { width: auto; min-width: 26px; }
+}
+
+/* ---------- Feladat ablak: fülek, mini teendők, történet ---------- */
+.task-tabs .mud-tabs-tabbar { background: transparent; }
+/* Fix magasságú fülterület: fülváltáskor az ablak nem változik, a gombok helyben maradnak; a hosszabb tartalom
+   (sok teendő, bejegyzés) a fülterületen belül görget, a fülsor és a gombsor mindig látszik. */
+.task-dialog .mud-dialog-content { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.task-tabs { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.task-tabs .mud-tabs-panels { height: clamp(260px, calc(100vh - 290px), 460px); display: flex; flex-direction: column; overflow: hidden; }
+/* A fülek tartalma kitölti a fix területet: az Adatok egészében görget, a Teendők és a Történet csak a listájában
+   (a hozzáadás mezői felül helyben maradnak). A .mud-tab-panel display: contents, így ezek közvetlen flex-elemek. */
+.tab-scroll, .ck, .st, .ck-list, .st-scroll { flex: 1 1 auto; min-height: 0; }
+.ck, .st { display: flex; flex-direction: column; }
+.tab-scroll, .ck-list, .st-scroll { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.tab-scroll { padding-top: 8px; }
+.task-tabs .mud-tab { flex: 1 1 0; min-width: 0; padding: 6px 8px; text-transform: none; font-weight: 600; white-space: nowrap; }
+.ck-progress { display: flex; align-items: center; gap: 10px; margin: 4px 0 8px; font-size: .8rem; color: var(--mud-palette-text-secondary); }
+.ck-bar { flex: 1; height: 6px; border-radius: 99px; background: rgba(var(--ink-rgb), .12); overflow: hidden; }
+.ck-bar span { display: block; height: 100%; border-radius: inherit; background: var(--mud-palette-primary); transition: width .3s; }
+.ck-progress.all .ck-bar span { background: #2e9e6e; }
+.ck-progress.all { color: #2e9e6e; font-weight: 700; }
+.ck-list { list-style: none; margin: 0; padding: 0; }
+.ck-item { display: flex; align-items: center; gap: 2px; min-height: 40px; border-bottom: 1px solid rgba(var(--ink-rgb), .07); }
+.ck-text {
+    display: block; flex: 1; min-width: 0; text-align: left; padding: 6px 4px; border: 0; background: none; color: inherit; font: inherit;
+    cursor: text; overflow-wrap: anywhere;
+}
+.ck-text:disabled { cursor: default; }
+.ck-item.done .ck-text { text-decoration: line-through; opacity: .55; }
+.ck-edit { flex: 1; margin: 0 !important; }
+.ck-del { opacity: .55; }
+.ck-del:hover, .ck-del:focus-visible { opacity: 1; }
+.ck-add { display: flex; align-items: center; gap: 8px; margin: 8px 0 10px; }
+.ck-add .mud-input-control { margin: 0; }
+.ck-empty { padding: 12px 4px; font-size: .85rem; color: var(--mud-palette-text-secondary); }
+.st-new { margin-bottom: 8px; }
+/* Dátum, idő és a gomb(ok) egy sorban; telefonon a dátum és az idő egymás mellett, a gombok alattuk. */
+.st-when { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 8px 12px; }
+.st-when.edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+.st-when .mud-input-control { margin: 0; }
+.st-when > .mud-button-root { margin-bottom: 2px; }
+.st-list { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid rgba(var(--ink-rgb), .12); }
+.st-entry { position: relative; padding: 4px 0 12px 10px; }
+.st-entry::before {
+    content: ""; position: absolute; left: -21px; top: 12px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--mud-palette-primary); box-shadow: 0 0 0 3px var(--mud-palette-surface);
+}
+.st-head { display: flex; align-items: center; gap: 2px; min-height: 32px; }
+.st-at { flex: 1; font-size: .78rem; font-weight: 700; letter-spacing: .04em; color: var(--mud-palette-text-secondary); }
+.st-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.m-mini-meta { display: none; }
+.m-badge.m-progress { display: inline-flex; align-items: center; gap: 3px; text-transform: none; letter-spacing: .02em; }
+/* Telefonon a feladat ablaka teljes képernyős (sok teendőnél, bejegyzésnél kell a hely). */
+@media (max-width: 700px) {
+    .mud-dialog.task-dialog { width: 100%; max-width: 100%; height: 100%; max-height: 100%; margin: 0; border-radius: 0; background: var(--mud-palette-background); }
+    .mud-dialog.task-dialog .mud-dialog-content { flex: 1; }
+    .task-tabs .mud-tabs-panels { height: auto; flex: 1; }
+    .st-when, .st-when.edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .st-when:not(.edit) > .mud-button-root { grid-column: 1 / -1; }
 }
 
 .icon-pick-label { margin: 16px 0 6px; font-size: .8rem; color: var(--mud-palette-text-secondary); }
@@ -583,6 +643,13 @@ html.kbd :is(.m-open, .sz-open):focus-visible { box-shadow: inset 0 0 0 2px var(
     /* mini-kártya: cím + határidő, jobbra a „kész” gomb; a jelölés a szerkesztő ablakban (koppintás) */
     :is(.m-quad, .touch-ghost) .m-card { width: 100%; height: auto; aspect-ratio: auto; border-radius: 7px; transform: none; }
     :is(.m-quad, .touch-ghost) .m-badges { display: none; }
+    :is(.m-quad, .touch-ghost) .m-mini-meta {
+        display: flex; align-items: center; gap: 6px; grid-column: 1; margin-top: 2px;
+        font-size: .68rem; font-weight: 700; color: rgba(var(--ink-rgb), .7);
+    }
+    :is(.m-quad, .touch-ghost) .m-mini-meta span { display: inline-flex; align-items: center; gap: 2px; }
+    :is(.m-quad, .touch-ghost) .m-mini-meta .mud-icon-root { font-size: .8rem; }
+    :is(.m-quad, .touch-ghost) .m-mini-meta.all { color: #3fbf86; }
     :is(.m-quad, .touch-ghost) .m-card-body {
         position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 6px;
         padding: 6px 6px 6px 8px; background: linear-gradient(90deg, rgba(var(--shade-rgb), .55), rgba(var(--shade-rgb), .25));
@@ -824,7 +891,7 @@ html.kbd .sz-link:focus-visible { outline: 2px solid var(--ink); outline-offset:
     .sz-head { gap: 10px; }
     .sz-head .bd-avatar { width: 36px; height: 36px; font-size: .8rem; }
     .sz-card .bd-name { font-size: .95rem; }
-    .sz-occ { display: none; }
+    .sz-occ { font-size: .62rem; letter-spacing: .1em; } /* csoportcímek nincsenek, így telefonon is kell */
     .sz-art.mud-icon-root { width: 64px; height: 64px; right: -8px; top: -6px; }
     /* elérhetőségek egy sorban: a telefonszám kiírva, az e-mail és a weboldal ikon-gomb (a teljes cím az aria-labelben) */
     .sz-contacts { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 4px; }

@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using AdaManagement.Server.Domain;
 using AdaManagement.Shared;
 
@@ -5,8 +6,17 @@ namespace AdaManagement.Server.Api;
 
 public static class Mapping
 {
-    public static TaskDto ToDto(this TaskItem t) =>
-        new(t.Id, t.Title, t.Notes, t.IsImportant, t.IsUrgent, t.DueDate, t.CreatedAt, t.CompletedAt, t.RecurringTemplateId, t.OccurrenceDate, t.Icon);
+    /// <summary>
+    /// Feladat → DTO lekérdezésben: a kártya jelvényeihez a teendő- és bejegyzésszámok ugyanabban a lekérdezésben
+    /// (allekérdezésként) jönnek, így nincs külön kör, és egy útvonalról sem maradhatnak le.
+    /// </summary>
+    public static readonly Expression<Func<TaskItem, TaskDto>> TaskToDto = t => new TaskDto(
+        t.Id, t.Title, t.Notes, t.IsImportant, t.IsUrgent, t.DueDate, t.CreatedAt, t.CompletedAt, t.RecurringTemplateId, t.OccurrenceDate, t.Icon,
+        t.Checklist.Count, t.Checklist.Count(i => i.IsDone), t.Story.Count);
+
+    public static ChecklistItemDto ToDto(this TaskChecklistItem i) => new(i.Id, i.Text, i.IsDone);
+
+    public static StoryEntryDto ToDto(this TaskStoryEntry e) => new(e.Id, e.At, e.Text);
 
     public static TemplateDto ToDto(this RecurringTemplate t) =>
         new(t.Id, t.Title, t.Notes, t.IntervalMonths, t.NextDueDate, t.SuggestedFollowingDueDate(), t.LeadDays, t.IsActive);
@@ -35,6 +45,9 @@ public static class Validate
     public const int TitleMax = 200;
     public const int NotesMax = 2000;
     public const int ShortNotesMax = 1000;
+    public const int ChecklistTextMax = TaskStoryLimits.ChecklistTextMax;
+    public const int ChecklistMaxItems = TaskStoryLimits.ChecklistMaxItems;
+    public const int StoryTextMax = TaskStoryLimits.StoryTextMax;
 
     public static Dictionary<string, string[]> Task(TaskEditDto d)
     {
@@ -43,6 +56,21 @@ public static class Validate
         Text(e, "Notes", d.Notes, NotesMax);
         if (d.Icon is { Length: > 40 }) e["Icon"] = ["Érvénytelen ikon."];
         Date(e, "DueDate", d.DueDate);
+        return e;
+    }
+
+    public static Dictionary<string, string[]> ChecklistItem(ChecklistItemEditDto d)
+    {
+        var e = new Dictionary<string, string[]>();
+        Text(e, "Text", d.Text, ChecklistTextMax, required: "A teendő szövege kötelező.");
+        return e;
+    }
+
+    public static Dictionary<string, string[]> StoryEntry(StoryEntryEditDto d)
+    {
+        var e = new Dictionary<string, string[]>();
+        Text(e, "Text", d.Text, StoryTextMax, required: "A bejegyzés szövege kötelező.");
+        Date(e, "At", DateOnly.FromDateTime(d.At.UtcDateTime));
         return e;
     }
 

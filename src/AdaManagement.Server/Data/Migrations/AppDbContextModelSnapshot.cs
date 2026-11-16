@@ -164,6 +164,35 @@ namespace AdaManagement.Server.Data.Migrations
                     b.ToTable("RecurringTemplates");
                 });
 
+            modelBuilder.Entity("AdaManagement.Server.Domain.TaskChecklistItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("IsDone")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TaskItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskItemId");
+
+                    b.ToTable("ChecklistItems");
+                });
+
             modelBuilder.Entity("AdaManagement.Server.Domain.TaskItem", b =>
                 {
                     b.Property<int>("Id")
@@ -215,6 +244,32 @@ namespace AdaManagement.Server.Data.Migrations
                         .HasFilter("[RecurringTemplateId] IS NOT NULL AND [OccurrenceDate] IS NOT NULL");
 
                     b.ToTable("Tasks");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Domain.TaskStoryEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("TaskItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskItemId");
+
+                    b.ToTable("StoryEntries");
                 });
 
             modelBuilder.Entity("AdaManagement.Server.Domain.Tradesperson", b =>
@@ -286,6 +341,15 @@ namespace AdaManagement.Server.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("AdaManagement.Server.Domain.TaskChecklistItem", b =>
+                {
+                    b.HasOne("AdaManagement.Server.Domain.TaskItem", null)
+                        .WithMany("Checklist")
+                        .HasForeignKey("TaskItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("AdaManagement.Server.Domain.TaskItem", b =>
                 {
                     b.HasOne("AdaManagement.Server.Domain.RecurringTemplate", "RecurringTemplate")
@@ -296,9 +360,25 @@ namespace AdaManagement.Server.Data.Migrations
                     b.Navigation("RecurringTemplate");
                 });
 
+            modelBuilder.Entity("AdaManagement.Server.Domain.TaskStoryEntry", b =>
+                {
+                    b.HasOne("AdaManagement.Server.Domain.TaskItem", null)
+                        .WithMany("Story")
+                        .HasForeignKey("TaskItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("AdaManagement.Server.Domain.RecurringTemplate", b =>
                 {
                     b.Navigation("Log");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Domain.TaskItem", b =>
+                {
+                    b.Navigation("Checklist");
+
+                    b.Navigation("Story");
                 });
 #pragma warning restore 612, 618
         }
