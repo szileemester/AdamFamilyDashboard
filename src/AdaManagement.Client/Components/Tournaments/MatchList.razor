@@ -1,0 +1,103 @@
+@* Meccsek fordulónként táblázatban (körmérkőzés, csoportok, svájci forduló, holtverseny): A – eredmény – B.
+   Svájci rendszerben a teljesen eldőlt forduló összecsukódik, hogy az éppen futó legyen szem előtt; a kattintás
+   felülírja. A svájci erőnyerő (egy résztvevő, ellenfél nélkül) külön jelölést kap. *@
+<div class="tr-table-wrap">
+    @if (Title is not null)
+    {
+        <div class="tr-table-title">@Title</div>
+    }
+    <table class="tr-table tr-matches">
+        <colgroup><col /><col class="tr-mx-score" /><col /></colgroup>
+        <tbody>
+            @foreach (var round in Rounds)
+            {
+                var open = IsOpen(round);
+                <tr class="@($"tr-mx-round{(CollapseDecidedRounds ? " toggle" : "")}")" @key="round.Round" @onclick="() => Toggle(round, open)">
+                    <td colspan="3">
+                        @if (CollapseDecidedRounds)
+                        {
+                            <MudIcon Icon="@(open ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+                        }
+                        <span>@round.Title</span>
+                        @if (CollapseDecidedRounds && !open)
+                        {
+                            <span class="tr-mx-count">@round.Matches.Count meccs lement</span>
+                        }
+                    </td>
+                </tr>
+                @if (open)
+                {
+                    @foreach (var match in round.Matches)
+                    {
+                        var m = match;
+                        var actionable = OnSelect.HasDelegate && m.ParticipantA is not null && m.ParticipantB is not null;
+                        var bye = m.ParticipantA is not null && m.ParticipantB is null;
+                        <tr class="@($"tr-mx{(actionable ? " actionable" : "")}{(m.Status == MatchStatus.InProgress ? " live" : "")}")" @key="m.Id"
+                            @onclick="() => actionable ? OnSelect.InvokeAsync(m) : Task.CompletedTask">
+                            @NameCell(m, m.ParticipantA, false)
+                            <td class="tr-mx-mid">
+                                @if (bye)
+                                {
+                                    <span class="tr-pill bye">erőnyerő</span>
+                                }
+                                else if (m.Status is MatchStatus.Completed or MatchStatus.Forfeit)
+                                {
+                                    <span>@m.AggregateScoreA – @m.AggregateScoreB</span>
+                                    @if (m.Status == MatchStatus.Forfeit)
+                                    {
+                                        <span class="tr-ff-inline" title="Feladás">FF</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="tr-mx-vs">–</span>
+                                }
+                            </td>
+                            @if (bye)
+                            {
+                                <td class="tr-mx-side end tr-hint-cell">kimaradt, győzelem jár</td>
+                            }
+                            else
+                            {
+                                @NameCell(m, m.ParticipantB, true)
+                            }
+                        </tr>
+                    }
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<BracketRoundDto> Rounds { get; set; } = [];
+    [Parameter] public string? Title { get; set; } = "Meccsek";
+    [Parameter] public bool CollapseDecidedRounds { get; set; }
+    [Parameter] public Guid? HoveredId { get; set; }
+    [Parameter] public EventCallback<Guid?> OnHover { get; set; }
+    [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
+
+    /// <summary>Csak a kézi nyitás/csukás marad meg; minden más az eredményeket követi.</summary>
+    private readonly Dictionary<int, bool> _overrides = [];
+
+    private static bool Decided(BracketRoundDto r) =>
+        r.Matches.All(m => m.Status is MatchStatus.Completed or MatchStatus.Forfeit);
+
+    private bool IsOpen(BracketRoundDto r) =>
+        _overrides.TryGetValue(r.Round, out var open) ? open : !(CollapseDecidedRounds && Decided(r));
+
+    private void Toggle(BracketRoundDto r, bool open)
+    {
+        if (CollapseDecidedRounds) _overrides[r.Round] = !open;
+    }
+
+    private RenderFragment NameCell(BracketMatchDto m, BracketSlotDto? slot, bool end) => __builder =>
+    {
+        var winner = slot is not null && m.WinnerId == slot.ParticipantId;
+        var hovered = slot is not null && slot.ParticipantId == HoveredId;
+        <td class="@($"tr-mx-side{(end ? " end" : "")}{(winner ? " winner" : "")}{(hovered ? " hovered" : "")}")"
+            @onmouseenter="() => OnHover.InvokeAsync(slot?.ParticipantId)" @onmouseleave="() => OnHover.InvokeAsync(null)">
+            <ParticipantLabel Name="@slot?.Name" Emoji="@slot?.Emoji" />
+        </td>
+    };
+}

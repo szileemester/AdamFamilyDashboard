@@ -1,0 +1,73 @@
+@* Egyenes kieséses ág: fordulónként egy oszlop abszolút pozicionált kártyákkal, köztük SVG könyökvonalak.
+   A függőleges helyeket a BracketLayout számolja (csak a valódi meccsek foglalnak sort). A bronzmeccs az utolsó
+   oszlopban, a döntő alatt áll. Szélesebb ág esetén a doboz vízszintesen görgethető. *@
+<div class="tr-tree-scroll" data-drag-scroll>
+    <div class="tr-tree">
+        <div class="tr-tree-heads">
+            @foreach (var round in Rounds)
+            {
+                <div class="tr-round-title" style="@($"width:{CardWidth}px")">@round.Title</div>
+            }
+        </div>
+        <div class="tr-tree-body">
+            @for (var ri = 0; ri < Rounds.Count; ri++)
+            {
+                var index = ri;
+                var round = Rounds[ri];
+                <div class="tr-tree-col" style="@Px("width", CardWidth) @Px("height", ContainerHeight)">
+                    @foreach (var match in round.Matches)
+                    {
+                        if (!_layout.Positions[index].TryGetValue(match.IndexInRound, out var y)) continue;
+                        <div class="tr-tree-card" style="@Px("top", y - CardHeight / 2)" @key="match.Id">
+                            <MatchCard Match="match" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" />
+                        </div>
+                    }
+                    @if (index == Rounds.Count - 1 && ThirdPlace is not null)
+                    {
+                        <div class="tr-round-title tr-tree-extra" style="@Px("top", ExtraLabelTop)">Bronzmeccs</div>
+                        <div class="tr-tree-card" style="@Px("top", ExtraLabelTop + LabelHeight)">
+                            <MatchCard Match="ThirdPlace" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" />
+                        </div>
+                    }
+                </div>
+                @if (index < Rounds.Count - 1)
+                {
+                    <svg class="tr-connector" width="@ConnectorWidth" height="@Num(ContainerHeight)" aria-hidden="true">
+                        @foreach (var match in round.Matches)
+                        {
+                            if (!_layout.Positions[index].TryGetValue(match.IndexInRound, out var y)) continue;
+                            var target = BracketLayout.TargetIndex(_layout.Widths[index], _layout.Widths[index + 1], match.IndexInRound);
+                            if (!_layout.Positions[index + 1].TryGetValue(target, out var ty)) continue;
+                            <path d="@BracketLayout.ElbowPath(0, y, ConnectorWidth, ty)" />
+                        }
+                    </svg>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    public const double CardWidth = 184, CardHeight = 64, Gap = 14, ConnectorWidth = 32, LabelHeight = 28, ExtraGap = 20;
+
+    [Parameter, EditorRequired] public IReadOnlyList<BracketRoundDto> Rounds { get; set; } = [];
+    [Parameter] public BracketMatchDto? ThirdPlace { get; set; }
+    [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
+
+    private BracketLayout.TreeLayout _layout = new([], [], 0);
+    private Guid? _hovered;
+
+    /// <summary>A bronzmeccs felirata a döntő kártyájának alsó éle alá kerül (nem a közepe alá, különben rácsúszna).</summary>
+    private double ExtraLabelTop =>
+        (_layout.Positions.Count == 0 || _layout.Positions[^1].Count == 0 ? 0 : _layout.Positions[^1].Values.Max()) + CardHeight / 2 + ExtraGap;
+
+    private double ContainerHeight => ThirdPlace is null ? _layout.TotalHeight : ExtraLabelTop + LabelHeight + CardHeight + 8;
+
+    protected override void OnParametersSet() =>
+        _layout = BracketLayout.ComputeTree(Rounds, roundsAlwaysHalve: true, CardHeight, Gap);
+
+    private void Hover(Guid? id) => _hovered = id;
+
+    private static string Num(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private static string Px(string prop, double v) => $"{prop}:{Num(v)}px;";
+}

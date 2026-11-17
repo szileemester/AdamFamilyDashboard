@@ -1,0 +1,85 @@
+@* Tabella: helyezés, név, lejátszott, győzelem, vereség, nyert játszma. Csoportkörben (ShowsPlayoffDestination) a sor
+   színe és címkéje azt mutatja, hova visz a helyezés a rájátszásban (ezt a szerver adja); végső tabellánál érmek. *@
+<div class="tr-table-wrap">
+    @if (Title is not null)
+    {
+        <div class="tr-table-title">@Title</div>
+    }
+    <div class="tr-table-scroll">
+        <table class="tr-table tr-standings">
+            <thead>
+                <tr>
+                    <th>Hely</th>
+                    <th>Név</th>
+                    <th class="num" title="Lejátszott meccsek">M</th>
+                    <th class="num" title="Győzelmek">Gy</th>
+                    <th class="num" title="Vereségek">V</th>
+                    <th class="num" title="Nyert játszmák">J</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Standings)
+                {
+                    var dest = ShowsPlayoffDestination ? row.PlayoffDestination : null;
+                    <tr class="@RowClass(row, dest)" @key="row.ParticipantId"
+                        @onmouseenter="() => OnHover.InvokeAsync(row.ParticipantId)" @onmouseleave="() => OnHover.InvokeAsync(null)">
+                        <td class="tr-st-rank">
+                            @if (ShowsPlayoffDestination)
+                            {
+                                <span>@row.Rank.</span>
+                                @if (dest is { } d)
+                                {
+                                    var (full, abbr) = Wording(d);
+                                    <span class="@($"tr-dest {d.ToString().ToLowerInvariant()}")" title="@full"><span class="tr-dest-full">@full</span><span class="tr-dest-short">@abbr</span></span>
+                                }
+                            }
+                            else
+                            {
+                                @if (row.Rank <= 3)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.EmojiEvents" Size="Size.Small" Class="tr-medal" />
+                                }
+                                <span>@row.Rank.</span>
+                            }
+                        </td>
+                        <td class="tr-st-name"><ParticipantLabel Name="@row.Name" Emoji="@row.Emoji" /></td>
+                        <td class="num">@row.Played</td>
+                        <td class="num">@row.Wins</td>
+                        <td class="num">@row.Losses</td>
+                        <td class="num">@row.GamesWon</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<StandingRowDto> Standings { get; set; } = [];
+    [Parameter] public string? Title { get; set; } = "Tabella";
+    [Parameter] public Guid? HoveredId { get; set; }
+    [Parameter] public EventCallback<Guid?> OnHover { get; set; }
+
+    /// <summary>Csoportkör: a helyezés rájátszásbeli következménye látszik az érmek helyett.</summary>
+    [Parameter] public bool ShowsPlayoffDestination { get; set; }
+
+    /// <summary>Egyenes kieséses rájátszásnál egy ág van, így a felső szint egyszerűen „Továbbjut”.</summary>
+    [Parameter] public bool SingleBracketPlayoff { get; set; }
+
+    private string RowClass(StandingRowDto row, LevelOutcome? dest)
+    {
+        var tone = ShowsPlayoffDestination
+            ? dest is { } d ? $" dest-{d.ToString().ToLowerInvariant()}" : ""
+            : row.Rank switch { 1 => " gold", 2 => " silver", 3 => " bronze", _ => "" };
+        return $"{tone}{(row.ParticipantId == HoveredId ? " hovered" : "")}".Trim();
+    }
+
+    private (string Full, string Short) Wording(LevelOutcome d) => d switch
+    {
+        LevelOutcome.Upper when SingleBracketPlayoff => ("Továbbjut", "TJ"),
+        LevelOutcome.Upper => ("Győztes ág", "GY"),
+        LevelOutcome.Lower => ("Vesztes ág", "V"),
+        LevelOutcome.Contested => ("Holtverseny", "HV"),
+        _ => ("Kiesik", "KI"),
+    };
+}

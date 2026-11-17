@@ -1,0 +1,51 @@
+@* Egy emoji választása a résztvevőnek a válogatott 80 közül (az Adaminatorból), vagy a meglévő törlése.
+   A rendszer emoji-betűtípusával jelenik meg, külön könyvtár nélkül. *@
+<MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Disabled="Disabled" PopoverClass="tr-emoji-pop">
+    <ActivatorContent>
+        <button type="button" class="@($"tr-emoji-btn{(Value is null ? " empty" : "")}")" disabled="@Disabled" @onclick="context.ToggleAsync"
+                aria-label="@(Value is null ? "Emoji választása" : $"Emoji: {Value}, csere")" title="@(Value is null ? "Emoji (nem kötelező)" : "Emoji cseréje")">
+            @if (Value is null)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.AddReaction" Size="Size.Small" />
+            }
+            else
+            {
+                @Value
+            }
+        </button>
+    </ActivatorContent>
+    <ChildContent>
+        <div class="tr-emoji-grid">
+            @foreach (var e in Emojis)
+            {
+                <MudMenuItem OnClick="() => Pick(e)" Class="@(e == Value ? "selected" : null)" aria-label="@($"{e} választása")">@e</MudMenuItem>
+            }
+        </div>
+        @if (Value is not null)
+        {
+            <MudMenuItem OnClick="() => Pick(null)" Icon="@Icons.Material.Filled.Clear">Emoji törlése</MudMenuItem>
+        }
+    </ChildContent>
+</MudMenu>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private static readonly string[] Emojis =
+    [
+        "🦊", "🐻", "🐯", "🦁", "🐺", "🐱", "🐶", "🐸",
+        "🐵", "🦉", "🦅", "🦈", "🐙", "🦖", "🐲", "🦄",
+        "⚽", "🏀", "🏈", "⚾", "🎾", "🏐", "🏓", "🏸",
+        "🥊", "♟️", "🎯", "🎳", "🏹", "🎣", "🛹", "🏆",
+        "🔥", "⚡", "⭐", "💎", "🚀", "🎮", "🎲", "🃏",
+        "👑", "🎩", "🦾", "🍀", "🌊", "🌵", "🍕", "🍩",
+        "🐼", "🐨", "🐧", "🦋", "🐝", "🦂", "🐍", "🦎",
+        "🍔", "🍟", "🌮", "🍦", "🍎", "🍇", "🥑", "🍉",
+        "👽", "🤖", "🎃", "👻", "🧙", "🗿", "🛸", "🎪",
+        "⚔️", "🛡️", "🪄", "🔮", "🏰", "💀", "🧝", "🐉",
+    ];
+
+    private Task Pick(string? emoji) => ValueChanged.InvokeAsync(emoji);
+}

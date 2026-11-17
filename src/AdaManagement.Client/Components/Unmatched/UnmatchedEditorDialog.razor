@@ -1,0 +1,101 @@
+@inject ApiClient Api
+
+@* A rejtett szerkesztő: minden itt állítódik be, semmi nem gyűlik magától. Bejelentkezés nélkül a mentés a Google
+   bejelentkezésre visz (az ApiClient 401-re átirányít). *@
+<MudDialog>
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+        }
+        <div class="um-edit-row">
+            <MudNumericField T="int" @bind-Value="_fiuk" Label="Fiúk" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudNumericField T="int" @bind-Value="_lanyok" Label="Lányok" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+        <div class="tr-hint mt-3 mb-1">Ki nyerte az utolsó meccset?</div>
+        <div class="um-victor">
+            @VictorButton(UnmatchedTeam.Fiuk, "Fiúk")
+            @VictorButton(null, "Döntetlen")
+            @VictorButton(UnmatchedTeam.Lanyok, "Lányok")
+        </div>
+        @foreach (var player in UnmatchedArt.AllPlayers)
+        {
+            <MudSelect T="string" Value="@Pick(player)" ValueChanged="v => _picks[player] = v" Label="@player" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Class="mt-3" Dense="true" @key="player">
+                <MudSelectItem T="string" Value="@("")"><em>nincs megadva</em></MudSelectItem>
+                @foreach (var name in Options(player))
+                {
+                    <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+                }
+            </MudSelect>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Save">Mentés</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public UnmatchedScoreboardDto Board { get; set; } = default!;
+
+    private int _fiuk, _lanyok;
+    private UnmatchedTeam? _victor;
+    private Dictionary<string, string> _picks = [];
+    private bool _busy;
+    private string? _error;
+
+    public static async Task<UnmatchedScoreboardDto?> ShowAsync(IDialogService dialogs, UnmatchedScoreboardDto board)
+    {
+        var parameters = new DialogParameters<UnmatchedEditorDialog> { { x => x.Board, board } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await dialogs.ShowAsync<UnmatchedEditorDialog>("Eredmény", parameters, options);
+        return await dialog.Result is { Canceled: false, Data: UnmatchedScoreboardDto saved } ? saved : null;
+    }
+
+    protected override void OnInitialized()
+    {
+        _fiuk = Board.FiukWins;
+        _lanyok = Board.LanyokWins;
+        _victor = Board.LastVictor;
+        _picks = Board.Picks.ToDictionary(p => p.PlayerName, p => p.Character);
+    }
+
+    private string Pick(string player) => _picks.GetValueOrDefault(player) ?? "";
+
+    /// <summary>A választható karakterek; egy már nem létező tárolt név is megmarad, hogy látszódjon, mi volt.</summary>
+    private IEnumerable<string> Options(string player)
+    {
+        var current = Pick(player);
+        return current.Length > 0 && UnmatchedArt.ArtFor(current) is null
+            ? UnmatchedArt.CharacterNames.Prepend(current)
+            : UnmatchedArt.CharacterNames;
+    }
+
+    private RenderFragment VictorButton(UnmatchedTeam? value, string label) => __builder =>
+    {
+        var on = _victor == value;
+        <MudButton Size="Size.Small" Variant="@(on ? Variant.Filled : Variant.Outlined)" Color="@(on ? Color.Primary : Color.Default)"
+                   OnClick="() => _victor = value">@label</MudButton>
+    };
+
+    private async Task Save()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var picks = UnmatchedArt.AllPlayers
+                .Where(p => !string.IsNullOrEmpty(Pick(p)))
+                .Select(p => new UnmatchedPickDto(p, Pick(p)))
+                .ToList();
+            var saved = await Api.PutAsync<UnmatchedScoreboardDto>("api/unmatched",
+                new UpdateUnmatchedScoreboardRequest(Math.Max(0, _fiuk), Math.Max(0, _lanyok), _victor, picks));
+            MudDialog.Close(DialogResult.Ok(saved));
+        }
+        catch (ApiException ex) when (ex.StatusCode == 401) { /* az ApiClient már a bejelentkezésre navigál */ }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

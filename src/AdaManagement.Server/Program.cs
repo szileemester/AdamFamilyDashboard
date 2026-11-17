@@ -2,6 +2,7 @@ using AdaManagement.Server.Api;
 using AdaManagement.Server.Auth;
 using AdaManagement.Server.Data;
 using AdaManagement.Server.Domain;
+using AdaManagement.Server.Tournaments.Application;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<AppClock>();
 builder.Services.AddOwnerAuth(builder.Configuration, builder.Environment);
 builder.Services.AddProblemDetails();
+builder.Services.AddTournaments();
 
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {

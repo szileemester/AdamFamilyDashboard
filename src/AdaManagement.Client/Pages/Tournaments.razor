@@ -1,0 +1,137 @@
+@page "/versenyek"
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+
+<PageTitle>Versenyek – Adam's family dashboard</PageTitle>
+
+@* Kezdőkép kereséssel, alatta a versenyek állapot szerint: Fut, Tervezett, Befejezett (ez utóbbi alapból összecsukva,
+   mert idővel felgyűlik, és ritkán kell; keresés közben viszont kinyílik, hogy a találat ne bújjon el). *@
+<section class="hero sub-hero">
+    <div class="hero-content">
+        <div class="hero-kicker">Játékest</div>
+        <div class="hero-head">
+            <div class="sub-hero-name">
+                <BackButton />
+                <h1 class="hero-title">Versenyek</h1>
+            </div>
+            <div class="hero-actions">
+                <button type="button" class="hero-btn primary" @onclick="Add"><MudIcon Icon="@Icons.Material.Filled.Add" /> Új</button>
+            </div>
+        </div>
+        @if (_items is { Count: > 0 })
+        {
+            <div class="hero-meta">
+                @foreach (var (status, _) in Sections)
+                {
+                    var n = _items.Count(t => t.Status == status);
+                    if (n > 0)
+                    {
+                        <span class="hero-stat"><b>@n</b> @status.Label().ToLowerInvariant()</span>
+                    }
+                }
+            </div>
+            <MudTextField @bind-Value="_query" Placeholder="Keresés név szerint…" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="sub-search"
+                          UserAttributes="@(new() { ["aria-label"] = "Keresés név szerint" })" />
+        }
+    </div>
+</section>
+
+@if (_items is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <div class="sub-empty">Még nincs verseny. Az „Új” gombbal hozhatod létre az elsőt.</div>
+}
+else
+{
+    var q = Format.Fold(_query);
+    var filtered = _items.Where(t => Format.Fold(t.Name).Contains(q)).ToList();
+    @if (filtered.Count == 0)
+    {
+        <div class="sub-empty">Nincs ilyen nevű verseny: „@_query”.</div>
+    }
+    @foreach (var (status, title) in Sections)
+    {
+        var items = filtered.Where(t => t.Status == status).ToList();
+        if (items.Count == 0) continue;
+        var finished = status == TournamentStatus.Finished;
+        var collapsed = finished && !_showFinished && q.Length == 0;
+        @if (finished)
+        {
+            <button type="button" class="sub-section tr-toggle" @onclick="() => _showFinished = !_showFinished" aria-expanded="@(!collapsed)">
+                @title <span class="tr-count">@items.Count</span>
+                <MudIcon Icon="@(collapsed ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ExpandLess)" />
+            </button>
+        }
+        else
+        {
+            <div class="sub-section">@title <span class="tr-count">@items.Count</span></div>
+        }
+        @if (!collapsed)
+        {
+            <div class="tr-grid">
+                @foreach (var t in items)
+                {
+                    <a class="@($"tr-card {StatusClass(t.Status)}")" href="@($"versenyek/{t.Id}")">
+                        <MudIcon Icon="@TypeIcon(t.Type)" Class="tr-art" aria-hidden="true" />
+                        <div class="tr-card-top">
+                            <div class="tr-card-name">@t.Name</div>
+                            <TournamentStatusChip Status="t.Status" />
+                        </div>
+                        <div class="tr-card-type">@t.Type.Label()</div>
+                        <div class="tr-card-meta">
+                            <span><MudIcon Icon="@Icons.Material.Filled.Event" /> @Format.Date(t.Date)</span>
+                            <span><MudIcon Icon="@Icons.Material.Filled.Groups" /> @t.ParticipantCount résztvevő</span>
+                        </div>
+                    </a>
+                }
+            </div>
+        }
+    }
+}
+
+@code {
+    private static readonly (TournamentStatus Status, string Title)[] Sections =
+    [
+        (TournamentStatus.Running, "Fut"),
+        (TournamentStatus.Planned, "Tervezett"),
+        (TournamentStatus.Finished, "Befejezett"),
+    ];
+
+    private List<TournamentSummaryDto>? _items;
+    private string? _query;
+    private bool _showFinished;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _items = (await Api.GetAsync<List<TournamentSummaryDto>>("api/tournaments")).OrderByDescending(t => t.Date).ToList(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _items = []; }
+    }
+
+    private async Task Add()
+    {
+        if (await TournamentFormDialog.ShowAsync(Dialogs, null) is { } created) Nav.NavigateTo($"versenyek/{created.Id}");
+    }
+
+    private static string StatusClass(TournamentStatus s) => s switch
+    {
+        TournamentStatus.Running => "running",
+        TournamentStatus.Planned => "planned",
+        _ => "finished",
+    };
+
+    /// <summary>A kártya háttérikonja a versenytípusból.</summary>
+    public static string TypeIcon(TournamentType type) => type switch
+    {
+        TournamentType.SingleElimination => Icons.Material.Filled.EmojiEvents,
+        TournamentType.DoubleElimination => Icons.Material.Filled.AccountTree,
+        TournamentType.RoundRobin => Icons.Material.Filled.Autorenew,
+        _ => Icons.Material.Filled.GridView,
+    };
+}

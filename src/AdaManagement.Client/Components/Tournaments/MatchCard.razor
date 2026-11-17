@@ -1,0 +1,40 @@
+@* Egy meccs kártyája: két sor (A és B), győztes kiemelve, eldőlt meccsnél a nyert játszmák száma.
+   Ha egy résztvevő fölé áll az egér, minden kártyán kiemelődik (HoveredId), így végig lehet követni az ágon. *@
+<div class="@CardClass" @onclick="Select" role="@(Actionable ? "button" : null)" tabindex="@(Actionable ? 0 : null)"
+     aria-label="@(Actionable ? $"{Match.ParticipantA!.Name} – {Match.ParticipantB!.Name}" : null)">
+    @SlotRow(Match.ParticipantA, true)
+    @SlotRow(Match.ParticipantB, false)
+    @if (Match.Status == MatchStatus.Forfeit)
+    {
+        <span class="tr-ff" title="Feladás">FF</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public BracketMatchDto Match { get; set; } = default!;
+    [Parameter] public Guid? HoveredId { get; set; }
+    [Parameter] public EventCallback<Guid?> OnHover { get; set; }
+
+    /// <summary>Kattintás egy meccsre (eredményrögzítés). Ha nincs megadva, a kártya csak olvasható.</summary>
+    [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
+
+    private bool Decided => Match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
+    private bool Actionable => OnSelect.HasDelegate && Match.ParticipantA is not null && Match.ParticipantB is not null;
+    private string CardClass => $"tr-match{(Actionable ? " actionable" : "")}{(Match.Status == MatchStatus.InProgress ? " live" : "")}";
+
+    private Task Select() => Actionable ? OnSelect.InvokeAsync(Match) : Task.CompletedTask;
+
+    private RenderFragment SlotRow(BracketSlotDto? slot, bool isA) => __builder =>
+    {
+        var winner = slot is not null && Match.WinnerId == slot.ParticipantId;
+        var hovered = slot is not null && slot.ParticipantId == HoveredId;
+        <div class="@($"tr-slotrow{(winner ? " winner" : "")}{(hovered ? " hovered" : "")}")"
+             @onmouseenter="() => OnHover.InvokeAsync(slot?.ParticipantId)" @onmouseleave="() => OnHover.InvokeAsync(null)">
+            <ParticipantLabel Name="@slot?.Name" Emoji="@slot?.Emoji" />
+            @if (Decided)
+            {
+                <span class="tr-score">@(isA ? Match.AggregateScoreA : Match.AggregateScoreB)</span>
+            }
+        </div>
+    };
+}

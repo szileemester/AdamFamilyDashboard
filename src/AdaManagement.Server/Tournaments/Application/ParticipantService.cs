@@ -1,0 +1,63 @@
+using AdaManagement.Server.Tournaments.Domain.Entities;
+using AdaManagement.Shared.Tournaments;
+
+namespace AdaManagement.Server.Tournaments.Application;
+
+/// <summary>Participant management use cases (allowed only while the tournament is Planned).</summary>
+public class ParticipantService
+{
+    private readonly ITournamentRepository _repository;
+
+    public ParticipantService(ITournamentRepository repository)
+    {
+        _repository = repository;
+    }
+
+    public async Task<IReadOnlyList<ParticipantDto>> ListAsync(Guid tournamentId, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        return tournament.Participants.ToOrderedDtos();
+    }
+
+    public async Task<ParticipantDto> AddAsync(Guid tournamentId, AddParticipantRequest request, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        var participant = tournament.AddParticipant(request.Name, request.Emoji);
+        await _repository.SaveChangesAsync(cancellationToken);
+        return participant.ToDto();
+    }
+
+    public async Task<ParticipantDto> UpdateAsync(Guid tournamentId, Guid participantId, UpdateParticipantRequest request, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.RenameParticipant(participantId, request.Name);
+        tournament.SetParticipantEmoji(participantId, request.Emoji);
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.Participants.First(p => p.Id == participantId).ToDto();
+    }
+
+    /// <summary>
+    /// Commits an entire roster at once - what the roster editor's single "Participants are set"
+    /// button does. One aggregate load and one transaction, so a rejected roster changes nothing.
+    /// </summary>
+    public async Task<IReadOnlyList<ParticipantDto>> ReplaceAsync(
+        Guid tournamentId, ReplaceRosterRequest request, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.ReplaceRoster(
+            request.Participants.Select(p => new RosterEntry(p.Id, p.Name, p.Emoji)).ToList());
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.Participants.ToOrderedDtos();
+    }
+
+    public async Task RemoveAsync(Guid tournamentId, Guid participantId, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.RemoveParticipant(participantId);
+        await _repository.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<Tournament> LoadAsync(Guid tournamentId, CancellationToken cancellationToken) =>
+        await _repository.GetByIdAsync(tournamentId, cancellationToken)
+        ?? throw new NotFoundException("A verseny nem található.");
+}

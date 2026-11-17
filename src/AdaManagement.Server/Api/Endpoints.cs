@@ -22,6 +22,10 @@ public static class Endpoints
         MapBirthdays(api.MapGroup("/birthdays"));
         MapTradespeople(api.MapGroup("/tradespeople"));
         MapSettings(api.MapGroup("/settings"));
+        api.MapTournaments();
+
+        // Bejelentkezés nélkül, csak olvasásra: a verseny nézői linkje és az Unmatched tábla.
+        app.MapGroup("/api/public").AllowAnonymous().MapPublicTournaments();
 
         // Ismeretlen /api útvonal ne az index.html-t kapja.
         app.MapFallback("/api/{**rest}", () => Results.NotFound());

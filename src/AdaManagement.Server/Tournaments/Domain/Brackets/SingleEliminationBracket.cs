@@ -1,0 +1,187 @@
+using AdaManagement.Server.Tournaments.Domain.Entities;
+using AdaManagement.Server.Tournaments.Domain.Exceptions;
+using AdaManagement.Shared.Tournaments;
+
+namespace AdaManagement.Server.Tournaments.Domain.Brackets;
+
+/// <summary>
+/// Pure Single Elimination bracket math and match-graph construction.
+///
+/// Layout rule (MVP): participants are ordered by seed; bye recipients occupy the top first-round
+/// pairings (one participant, no opponent) and advance directly into round 2, and the remaining
+/// players fill the rest of the round in seed order. The admin controls who receives a bye and the
+/// relative order of the players; bye pairings are always placed at the top of the bracket.
+/// </summary>
+public static class SingleEliminationBracket
+{
+    public static int ComputeBracketSize(int participantCount)
+    {
+        if (participantCount < 2)
+        {
+            throw new DomainException("Az ághoz legalább 2 résztvevő kell.");
+        }
+
+        var size = 1;
+        while (size < participantCount)
+        {
+            size <<= 1;
+        }
+
+        return size;
+    }
+
+    public static int ComputeRequiredByes(int participantCount) =>
+        ComputeBracketSize(participantCount) - participantCount;
+
+    public static int RoundCount(int bracketSize)
+    {
+        var rounds = 0;
+        while (1 << rounds < bracketSize)
+        {
+            rounds++;
+        }
+
+        return rounds;
+    }
+
+    /// <summary>
+    /// Builds the complete Single Elimination match graph from the tournament's seeded participants.
+    /// Round-1 bye pairings do not create a match; instead the bye recipient is pre-placed into its
+    /// round-2 slot (automatic advancement). Produces exactly (participants - 1) winner-bracket
+    /// matches, plus an optional Third Place match when two semifinals exist.
+    /// </summary>
+    public static List<Match> BuildMatches(Tournament tournament)
+    {
+        var ordered = tournament.Participants.OrderBy(p => p.Seed).ToList();
+        var count = ordered.Count;
+        var size = ComputeBracketSize(count);
+        var requiredByes = ComputeRequiredByes(count);
+        var pairingCount = size / 2;
+        var pairings = ComputeRound1Pairings(ordered, size, requiredByes);
+
+        var rounds = RoundCount(size);
+        // The Third Place match is played alongside the Final but is not the deciding match, so it
+        // keeps the regular format rather than the Final's.
+        var format = tournament.PlayoffFormatFor(BracketSegment.Winner);
+        var scoreType = tournament.DefaultScoreType;
+        var matches = new List<Match>();
+
+        // Bye recipients advance into these round-2 slots.
+        var round2Prefill = new Dictionary<int, (Guid? Slot0, Guid? Slot1)>();
+
+        for (var k = 0; k < pairingCount; k++)
+        {
+            var (a, b) = pairings[k];
+            if (a is not null && b is not null)
+            {
+                matches.Add(Match.Create(
+                    tournament.Id, BracketSegment.Winner, 1, k, a, b, tournament.FormatForWinnerRound(1, rounds), scoreType));
+                continue;
+            }
+
+            // Bye pairing: slot A holds the participant, slot B is empty -> advance to round 2.
+            var targetMatch = k / 2;
+            var slot = k % 2;
+            var current = round2Prefill.TryGetValue(targetMatch, out var existing) ? existing : (null, null);
+            if (slot == 0)
+            {
+                current.Item1 = a;
+            }
+            else
+            {
+                current.Item2 = a;
+            }
+
+            round2Prefill[targetMatch] = current;
+        }
+
+        for (var r = 2; r <= rounds; r++)
+        {
+            var matchesInRound = size >> r;
+            for (var m = 0; m < matchesInRound; m++)
+            {
+                Guid? a = null;
+                Guid? b = null;
+                if (r == 2 && round2Prefill.TryGetValue(m, out var pre))
+                {
+                    a = pre.Slot0;
+                    b = pre.Slot1;
+                }
+
+                matches.Add(Match.Create(
+                    tournament.Id, BracketSegment.Winner, r, m, a, b, tournament.FormatForWinnerRound(r, rounds), scoreType));
+            }
+        }
+
+        if (tournament.ThirdPlaceEnabled && HasTwoSemifinals(rounds, matches))
+        {
+            matches.Add(Match.Create(tournament.Id, BracketSegment.ThirdPlace, rounds, 0, null, null, format, scoreType));
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Computes round-1 pairings for a seeded roster: bye recipients occupy the first
+    /// <paramref name="requiredByes"/> pairing slots (participant only, no opponent), and the
+    /// remaining players fill the rest of the round in seed order, two at a time. Shared by Single
+    /// and Double Elimination bracket construction, which both use this exact convention.
+    /// </summary>
+    internal static (Guid? A, Guid? B)[] ComputeRound1Pairings(IReadOnlyList<Participant> ordered, int bracketSize, int requiredByes)
+    {
+        var byes = ordered.Where(p => p.HasBye).ToList();
+        if (byes.Count != requiredByes)
+        {
+            throw new DomainException($"Pontosan {requiredByes} erőnyerőt kell kijelölni; most {byes.Count} van kijelölve.");
+        }
+
+        var players = ordered.Where(p => !p.HasBye).ToList();
+        var pairingCount = bracketSize / 2;
+        var pairings = new (Guid? A, Guid? B)[pairingCount];
+
+        for (var k = 0; k < requiredByes; k++)
+        {
+            pairings[k] = (byes[k].Id, null);
+        }
+
+        var playerIndex = 0;
+        for (var k = requiredByes; k < pairingCount; k++)
+        {
+            pairings[k] = (players[playerIndex].Id, players[playerIndex + 1].Id);
+            playerIndex += 2;
+        }
+
+        return pairings;
+    }
+
+    /// <summary>The Winner-segment match/slot that a match at (round, indexInRound) feeds its winner into. Null once the match is the Final.</summary>
+    public static (int Round, int IndexInRound, bool SlotA)? NextWinnerSlot(int round, int indexInRound, int totalRounds)
+    {
+        if (round >= totalRounds)
+        {
+            return null;
+        }
+
+        return (round + 1, indexInRound / 2, indexInRound % 2 == 0);
+    }
+
+    /// <summary>
+    /// Whether the Third Place slot fed by a given semifinal's loser is slot A. Semifinal 0's loser
+    /// takes slot A and semifinal 1's loser takes slot B, mirroring how their winners feed the
+    /// Final's slots A/B via <see cref="NextWinnerSlot"/>.
+    /// </summary>
+    public static bool ThirdPlaceSlotAFromSemifinalIndex(int semifinalIndex) => semifinalIndex == 0;
+
+    private static bool HasTwoSemifinals(int rounds, List<Match> matches)
+    {
+        if (rounds < 2)
+        {
+            return false;
+        }
+
+        // Semifinals are the round before the final. For 3+ round brackets that round is always
+        // fully created; for a 2-round bracket it is round 1, which byes may have reduced.
+        var semifinalRound = rounds - 1;
+        return rounds >= 3 || matches.Count(m => m.Segment == BracketSegment.Winner && m.Round == semifinalRound) == 2;
+    }
+}

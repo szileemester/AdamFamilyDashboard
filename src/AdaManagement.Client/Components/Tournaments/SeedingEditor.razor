@@ -1,0 +1,185 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@* Indítás előtti ág-előnézet (az Adaminator BracketPreview-ja): véletlen kiemelés, sorrend fel/le, erőnyerők
+   kijelölése, mentés, indítás. A svájci csoportkör is ezt használja (az 1. forduló a kezdősorrendből párosít);
+   a körmérkőzéses csoportkör a GroupsPreview-t. *@
+@if (Participants.Count >= TournamentLimits.MinParticipants)
+{
+    <section class="tr-panel">
+        <div class="tr-panel-head">
+            <h2 class="tr-panel-title">@(Kind == Shape.RoundRobin ? "Sorrend" : Kind == Shape.SwissPool ? "Kezdősorrend" : "Kiemelés")</h2>
+            @if (Seeded && Required > 0)
+            {
+                <span class="@($"tr-pill {(ByesValid ? "ok" : "warn")}")">@_byes.Count / @Required erőnyerő</span>
+            }
+        </div>
+
+        @if (!Seeded)
+        {
+            <p class="tr-hint">@GenerateText</p>
+            <div class="tr-panel-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Casino" OnClick="Generate" Disabled="!CanSeed">
+                    Sorsolás
+                </MudButton>
+            </div>
+        }
+        else
+        {
+            <p class="tr-hint">@ReorderText</p>
+            <ol class="tr-seeds">
+                @for (var i = 0; i < _order.Count; i++)
+                {
+                    var p = _order[i];
+                    var index = i;
+                    <li class="tr-seed" @key="p.Id">
+                        <span class="tr-seed-no">@(i + 1)</span>
+                        <ParticipantLabel Name="@p.Name" Emoji="@p.Emoji" />
+                        @if (_byes.Contains(p.Id))
+                        {
+                            <span class="tr-pill bye">erőnyerő</span>
+                        }
+                        <span class="tr-seed-tools">
+                            @if (Required > 0)
+                            {
+                                <MudCheckBox T="bool" Value="_byes.Contains(p.Id)" ValueChanged="_ => ToggleBye(p.Id)" Size="Size.Small"
+                                             Color="Color.Secondary"
+                                             UserAttributes="@(new() { ["aria-label"] = $"{p.Name} erőnyerő", ["title"] = "Erőnyerő (kihagyja az első fordulót)" })" />
+                            }
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="index == 0"
+                                           OnClick="() => Move(index, -1)" aria-label="@($"{p.Name} feljebb")" />
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="index == _order.Count - 1"
+                                           OnClick="() => Move(index, 1)" aria-label="@($"{p.Name} lejjebb")" />
+                        </span>
+                    </li>
+                }
+            </ol>
+            <div class="tr-panel-actions">
+                <MudButton StartIcon="@Icons.Material.Filled.Casino" OnClick="Generate" Disabled="!CanSeed">Újrasorsolás</MudButton>
+                <MudButton Variant="Variant.Outlined" OnClick="SaveOrder" Disabled="@(!_dirty || !ByesValid || _busy)">Sorrend mentése</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start" Disabled="!CanStart">
+                    Verseny indítása
+                </MudButton>
+            </div>
+            @if (_dirty)
+            {
+                <div class="tr-warn">Mentetlen sorrend: indítás előtt mentsd el.</div>
+            }
+            @if (Required > 0 && !ByesValid)
+            {
+                <div class="tr-warn">Pontosan @Required erőnyerőt jelölj ki.</div>
+            }
+        }
+        @if (RosterUnsaved)
+        {
+            <div class="tr-warn">A névsorban mentetlen változás van: előbb nyomd meg a „Névsor rögzítése” gombot.</div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid TournamentId { get; set; }
+    [Parameter, EditorRequired] public TournamentType Type { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<ParticipantDto> Participants { get; set; } = [];
+    [Parameter] public bool RosterUnsaved { get; set; }
+
+    /// <summary>A szerver által visszaadott, frissen kiemelt névsor.</summary>
+    [Parameter] public EventCallback<IReadOnlyList<ParticipantDto>> OnParticipantsChanged { get; set; }
+
+    /// <summary>A verseny elindult: a szülő töltse újra.</summary>
+    [Parameter] public EventCallback OnStarted { get; set; }
+
+    private enum Shape { RoundRobin, SwissPool, BracketWithByes, ExactBracket }
+
+    private List<ParticipantDto> _order = [];
+    private HashSet<Guid> _byes = [];
+    private IReadOnlyList<ParticipantDto>? _mirrored;
+    private bool _dirty, _busy;
+
+    private bool Seeded => Participants.Count >= 2 && Participants.All(p => p.Seed > 0);
+    private int Required => TournamentText.RequiredByes(Participants.Count, Type);
+    private bool ByesValid => _byes.Count == Required;
+    private bool CanSeed => !_busy && !RosterUnsaved;
+    private bool CanStart => !_busy && Seeded && !_dirty && ByesValid && !RosterUnsaved;
+
+    private Shape Kind => Type switch
+    {
+        TournamentType.RoundRobin => Shape.RoundRobin,
+        TournamentType.GroupStagePlayoff => Shape.SwissPool,
+        _ => Required > 0 ? Shape.BracketWithByes : Shape.ExactBracket,
+    };
+
+    private string GenerateText => Kind switch
+    {
+        Shape.RoundRobin => "Sorsold ki a körmérkőzés sorrendjét.",
+        Shape.SwissPool => "Sorsold ki a svájci mezőny kezdősorrendjét.",
+        Shape.BracketWithByes => "Sorsold ki a kiemelést, aztán jelöld ki az erőnyerőket.",
+        _ => "Sorsold ki a kiemelést.",
+    };
+
+    private string ReorderText => Kind switch
+    {
+        Shape.RoundRobin => "A sorrend átrendezhető. Mindenki mindenkivel egyszer játszik.",
+        Shape.SwissPool => "A sorrend átrendezhető. Az 1. fordulóban a szomszédok játszanak, utána az eredmények alapján párosít. Páratlan létszámnál fordulónként valaki kimarad.",
+        Shape.BracketWithByes => $"A kiemelés átrendezhető. Jelölj ki pontosan {Required} erőnyerőt: ők kihagyják az első fordulót.",
+        _ => "A kiemelés átrendezhető. A létszám pont kitölti az ágat, erőnyerő nem kell.",
+    };
+
+    protected override void OnParametersSet()
+    {
+        // A szerver állapotát tükrözi, amíg nincs mentetlen átrendezés.
+        if (!ReferenceEquals(_mirrored, Participants) && !_dirty)
+        {
+            _order = Participants.OrderBy(p => p.Seed).ToList();
+            _byes = Participants.Where(p => p.HasBye).Select(p => p.Id).ToHashSet();
+            _mirrored = Participants;
+        }
+    }
+
+    private void Move(int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= _order.Count) return;
+        (_order[index], _order[target]) = (_order[target], _order[index]);
+        _dirty = true;
+    }
+
+    private void ToggleBye(Guid id)
+    {
+        if (!_byes.Remove(id)) _byes.Add(id);
+        _dirty = true;
+    }
+
+    private Task Generate() => Run(() => Api.PostAsync<List<ParticipantDto>>($"api/tournaments/{TournamentId}/bracket/generate"));
+
+    private Task SaveOrder() => Run(() => Api.PutAsync<List<ParticipantDto>>($"api/tournaments/{TournamentId}/bracket",
+        new UpdateBracketRequest(_order.Select(p => p.Id).ToList(), _byes.ToList())));
+
+    private async Task Run(Func<Task<List<ParticipantDto>>> call)
+    {
+        _busy = true;
+        try
+        {
+            var participants = await call();
+            _dirty = false;
+            await OnParticipantsChanged.InvokeAsync(participants);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Start()
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Verseny indítása", "Az indítás rögzíti a résztvevőket és az ágat, és létrehozza a meccseket. Mehet?",
+                yesText: "Indítás", cancelText: "Mégse") != true) return;
+        _busy = true;
+        try
+        {
+            await Api.PostAsync<TournamentDto>($"api/tournaments/{TournamentId}/start");
+            await OnStarted.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

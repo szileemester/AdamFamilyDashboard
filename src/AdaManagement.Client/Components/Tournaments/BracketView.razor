@@ -1,0 +1,209 @@
+@* Egy elindult verseny nézete fülekre bontva, típustól függően (az Adaminator BracketView-ja):
+   - egyenes és dupla kiesés: Versenyág, Végeredmény;
+   - körmérkőzés: Menetrend, Holtverseny, Tabella;
+   - csoportkör + rájátszás: Csoportkör, Holtverseny, Rájátszás, Végeredmény.
+   Betöltéskor az éppen élő szakasz nyílik meg; a Focus a szülő műveletei után (pl. holtverseny-meccsek generálása)
+   odaugrik, ahol a friss meccsek vannak. *@
+<MudTabs @bind-ActivePanelIndex="_index" Elevation="0" ApplyEffectsToContainer="true" TabPanelsClass="pt-3" MinimumTabWidth="96px" Class="tr-tabs">
+    @foreach (var (key, title) in _tabs)
+    {
+        <MudTabPanel Text="@title" @key="key">@Panel(key)</MudTabPanel>
+    }
+</MudTabs>
+
+@code {
+    [Parameter, EditorRequired] public BracketDto Bracket { get; set; } = default!;
+
+    /// <summary>Kattintás egy meccsre; befejezett versenynél nincs megadva, így minden csak olvasható.</summary>
+    [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
+
+    /// <summary>A fül kulcsa, ahová ugrani kell; a FocusStamp változása jelzi, hogy újra ugorjon (ugyanarra is).</summary>
+    [Parameter] public string? Focus { get; set; }
+    [Parameter] public int FocusStamp { get; set; }
+
+    private List<(string Key, string Title)> _tabs = [];
+    private int _index;
+    private int _seenStamp;
+    private TournamentType? _seenType;
+    private Guid? _hovered;
+
+    private bool IsRoundRobin => Bracket.Type == TournamentType.RoundRobin;
+    private bool IsGroupStage => Bracket.Type == TournamentType.GroupStagePlayoff && Bracket.GroupStage is not null;
+
+    private static bool RoundDecided(BracketRoundDto r) => r.Matches.All(m => m.Status is MatchStatus.Completed or MatchStatus.Forfeit);
+    private bool TiebreakersPending => !Bracket.TiebreakerRounds.All(RoundDecided);
+
+    protected override void OnParametersSet()
+    {
+        _tabs = IsGroupStage
+            ? [("groupStage", "Csoportkör"), ("tiebreakers", "Holtverseny"), ("playoffs", "Rájátszás"), ("leaderboard", "Végeredmény")]
+            : IsRoundRobin
+                ? [("main", "Menetrend"), ("tiebreakers", "Holtverseny"), ("leaderboard", "Tabella")]
+                : [("main", "Versenyág"), ("leaderboard", "Végeredmény")];
+
+        if (_seenType != Bracket.Type)
+        {
+            _seenType = Bracket.Type;
+            Select(InitialTab());
+        }
+        if (FocusStamp != _seenStamp)
+        {
+            _seenStamp = FocusStamp;
+            if (Focus is not null) Select(Focus);
+        }
+    }
+
+    /// <summary>Az élő szakasz: befejezettnél a végeredmény, futó rájátszásnál a rájátszás, függő holtversenynél a holtverseny.</summary>
+    private string InitialTab()
+    {
+        if (Bracket.Status == TournamentStatus.Finished) return "leaderboard";
+        if (IsGroupStage)
+        {
+            if (Bracket.WinnerRounds.Count > 0) return "playoffs";
+            var hasTiebreakers = Bracket.Groups.Any(g => g.TiebreakerRounds.Count > 0) || Bracket.TiebreakerRounds.Count > 0;
+            return hasTiebreakers || Bracket.NeedsTiebreakers ? "tiebreakers" : "groupStage";
+        }
+        return IsRoundRobin && (Bracket.NeedsTiebreakers || TiebreakersPending) ? "tiebreakers" : "main";
+    }
+
+    private void Select(string key)
+    {
+        var i = _tabs.FindIndex(t => t.Key == key);
+        if (i >= 0) _index = i;
+    }
+
+    private void Hover(Guid? id) => _hovered = id;
+
+    private RenderFragment Panel(string key) => key switch
+    {
+        "main" => MainPanel,
+        "tiebreakers" => TiebreakersPanel,
+        "groupStage" => GroupStagePanel,
+        "playoffs" => PlayoffsPanel,
+        _ => LeaderboardPanel,
+    };
+
+    private RenderFragment MainPanel => __builder =>
+    {
+        if (Bracket.Type == TournamentType.DoubleElimination)
+        {
+            <PlayoffGrid WinnerRounds="Bracket.WinnerRounds" LoserRounds="Bracket.LoserRounds" GrandFinal="Bracket.GrandFinal" OnSelect="OnSelect" />
+        }
+        else if (IsRoundRobin)
+        {
+            <RoundColumns Rounds="Bracket.WinnerRounds" OnSelect="OnSelect" />
+        }
+        else
+        {
+            <BracketTree Rounds="Bracket.WinnerRounds" ThirdPlace="Bracket.ThirdPlace" OnSelect="OnSelect" />
+        }
+    };
+
+    private RenderFragment PlayoffsPanel => __builder =>
+    {
+        if (Bracket.WinnerRounds.Count == 0)
+        {
+            <div class="tr-hint">A rájátszás ága a csoportkör végén, a „Rájátszás indítása” gombbal jön létre.</div>
+        }
+        else if (Bracket.GroupStage!.PlayoffKind == PlayoffKind.SingleElimination)
+        {
+            <BracketTree Rounds="Bracket.WinnerRounds" ThirdPlace="Bracket.ThirdPlace" OnSelect="OnSelect" />
+        }
+        else
+        {
+            <PlayoffGrid WinnerRounds="Bracket.WinnerRounds" LoserRounds="Bracket.LoserRounds" GrandFinal="Bracket.GrandFinal" OnSelect="OnSelect" />
+        }
+    };
+
+    private RenderFragment LeaderboardPanel => __builder =>
+    {
+        if (IsRoundRobin)
+        {
+            <div class="tr-narrow"><StandingsTable Standings="Bracket.Standings" Title="@null" /></div>
+        }
+        else
+        {
+            <Placements Groups="Bracket.Placements" />
+        }
+    };
+
+    private RenderFragment GroupStagePanel => __builder =>
+    {
+        var gs = Bracket.GroupStage!;
+        var single = gs.PlayoffKind == PlayoffKind.SingleElimination;
+        if (gs.Kind == GroupStageKind.Swiss)
+        {
+            <div class="tr-section-title">@(gs.RoundsPlayed > 0 ? $"Svájci rendszer · {gs.RoundsPlayed}. forduló / {gs.RoundsTotal}" : "Svájci rendszer")</div>
+            <div class="tr-stage">
+                <MatchList Rounds="gs.Rounds" CollapseDecidedRounds="true" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" />
+                <StandingsTable Standings="gs.Standings" ShowsPlayoffDestination="true" SingleBracketPlayoff="single" HoveredId="_hovered" OnHover="Hover" />
+            </div>
+        }
+        else
+        {
+            @foreach (var g in Bracket.Groups)
+            {
+                <div class="tr-section-title" @key="g.GroupIndex">@TournamentText.GroupLabel(g.GroupIndex)</div>
+                <div class="tr-stage">
+                    <MatchList Rounds="g.Rounds" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" />
+                    <StandingsTable Standings="g.Standings" ShowsPlayoffDestination="true" SingleBracketPlayoff="single" HoveredId="_hovered" OnHover="Hover" />
+                </div>
+            }
+        }
+    };
+
+    private RenderFragment TiebreakersPanel => __builder =>
+    {
+        if (IsGroupStage)
+        {
+            var groups = Bracket.Groups.Where(g => g.TiebreakerRounds.Count > 0).ToList();
+            if (Bracket.NeedsTiebreakers)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    Holtverseny dönti el, ki jut a rájátszásba. A „Holtverseny eldöntése” gomb létrehozza a következő kört; addig a rájátszás nem indítható.
+                </MudAlert>
+            }
+            @foreach (var g in groups)
+            {
+                <div class="tr-section-title" @key="g.GroupIndex">@TournamentText.GroupLabel(g.GroupIndex)</div>
+                <div class="tr-narrow mb-4"><MatchList Rounds="g.TiebreakerRounds" Title="Holtverseny-meccsek" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" /></div>
+            }
+            @if (Bracket.TiebreakerRounds.Count > 0)
+            {
+                <div class="tr-section-title">Csoportok között</div>
+                <div class="tr-narrow mb-4"><MatchList Rounds="Bracket.TiebreakerRounds" Title="Az utolsó rájátszás-helyekért" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" /></div>
+            }
+            @if (groups.Count == 0 && Bracket.TiebreakerRounds.Count == 0 && !Bracket.NeedsTiebreakers)
+            {
+                <div class="tr-hint">Nem kellett holtversenyt játszani: minden csoport tabellája magától eldőlt.</div>
+            }
+        }
+        else
+        {
+            @if (TiebreakersPending)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    Holtversenyt kell lejátszani: amíg ezek a meccsek el nem dőlnek, a verseny nem zárható le.
+                </MudAlert>
+            }
+            @if (Bracket.NeedsTiebreakers)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    Egy helyezést eldöntő holtverseny még nyitott. A „Holtverseny eldöntése” gomb létrehozza a következő kört.
+                </MudAlert>
+            }
+            @if (Bracket.TiebreakerRounds.Count > 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                    Ezek a meccsek önmagukban rangsorolnak: előbb az itt nyert meccsek száma, egyenlőségnél az, ki kit vert itt.
+                    Így valaki megelőzheti azt is, aki a menetrendben legyőzte.
+                </MudAlert>
+                <div class="tr-narrow"><MatchList Rounds="Bracket.TiebreakerRounds" Title="Holtverseny-meccsek" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" /></div>
+            }
+            else if (!Bracket.NeedsTiebreakers)
+            {
+                <div class="tr-hint">Nem kellett holtversenyt játszani: a tabella magától eldőlt.</div>
+            }
+        }
+    };
+}

@@ -1,0 +1,86 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@* Csoportkör + rájátszás (körmérkőzéses csoportokkal) indítás előtt: véletlen csoportsorsolás (újrasorsolható), aztán indítás. *@
+@if (Participants.Count >= TournamentLimits.MinParticipants)
+{
+    <section class="tr-panel">
+        <div class="tr-panel-head">
+            <h2 class="tr-panel-title">Csoportsorsolás</h2>
+        </div>
+        @if (!Drawn)
+        {
+            <p class="tr-hint">A @Participants.Count résztvevő véletlenszerűen @GroupCount csoportba kerül.</p>
+            <div class="tr-panel-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Casino" OnClick="Draw" Disabled="!CanDraw">
+                    Csoportok sorsolása
+                </MudButton>
+            </div>
+        }
+        else
+        {
+            <p class="tr-hint">Minden csoport körmérkőzést játszik, a tabellák alapján jön a rájátszás kiemelése: előbb a csoportelsők, aztán a másodikok, és így tovább.</p>
+            <div class="tr-groups">
+                @for (var g = 0; g < GroupCount; g++)
+                {
+                    var index = g;
+                    <div class="tr-group">
+                        <div class="tr-group-title">@TournamentText.GroupLabel(index)</div>
+                        @foreach (var p in Participants.Where(p => p.GroupIndex == index).OrderBy(p => p.Seed))
+                        {
+                            <ParticipantLabel Name="@p.Name" Emoji="@p.Emoji" />
+                        }
+                    </div>
+                }
+            </div>
+            <div class="tr-panel-actions">
+                <MudButton StartIcon="@Icons.Material.Filled.Casino" OnClick="Draw" Disabled="!CanDraw">Újrasorsolás</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Start"
+                           Disabled="@(_busy || RosterUnsaved)">
+                    Verseny indítása
+                </MudButton>
+            </div>
+        }
+        @if (RosterUnsaved)
+        {
+            <div class="tr-warn">A névsorban mentetlen változás van: előbb nyomd meg a „Névsor rögzítése” gombot.</div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid TournamentId { get; set; }
+    [Parameter, EditorRequired] public int GroupCount { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<ParticipantDto> Participants { get; set; } = [];
+    [Parameter] public bool RosterUnsaved { get; set; }
+    [Parameter] public EventCallback<IReadOnlyList<ParticipantDto>> OnParticipantsChanged { get; set; }
+    [Parameter] public EventCallback OnStarted { get; set; }
+
+    private bool _busy;
+
+    private bool Drawn => Participants.Count > 0 && Participants.All(p => p.GroupIndex is not null);
+    private bool CanDraw => !_busy && !RosterUnsaved;
+
+    private async Task Draw()
+    {
+        _busy = true;
+        try { await OnParticipantsChanged.InvokeAsync(await Api.PostAsync<List<ParticipantDto>>($"api/tournaments/{TournamentId}/bracket/draw-groups")); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Start()
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Verseny indítása", "Az indítás rögzíti a csoportokat, és létrehozza a csoportmeccseket. Mehet?",
+                yesText: "Indítás", cancelText: "Mégse") != true) return;
+        _busy = true;
+        try
+        {
+            await Api.PostAsync<TournamentDto>($"api/tournaments/{TournamentId}/start");
+            await OnStarted.InvokeAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

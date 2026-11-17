@@ -1,0 +1,42 @@
+@* Dupla kieséses rájátszás egy közös rácson (az Adaminator PlayoffGrid-je): felül a győztes ág, alatta a vesztes ág,
+   jobbra a nagydöntő. A győztes ág fordulói oszlopot ugorhatnak, hogy a döntője a vesztes ág döntőjével egy vonalba
+   kerüljön; a helyeket a BracketLayout.ComputePlayoffGrid számolja. A csoportkör + rájátszás is ezt használja. *@
+<div class="tr-tree-scroll" data-drag-scroll>
+    <div class="tr-grid-canvas" style="@Px("width", _grid.Width) @Px("height", _grid.Height)">
+        <svg class="tr-connector tr-grid-lines" width="@Num(_grid.Width)" height="@Num(_grid.Height)" aria-hidden="true">
+            @foreach (var d in _grid.Paths)
+            {
+                <path d="@d" />
+            }
+        </svg>
+        @foreach (var h in _grid.Headers)
+        {
+            <div class="tr-round-title tr-grid-head" style="@Px("left", h.X) @Px("top", h.Top) @Px("width", BracketTree.CardWidth)" title="@h.Title" @key="h.Key">@h.Title</div>
+        }
+        @foreach (var c in _grid.Cards)
+        {
+            <div class="tr-grid-card" style="@Px("left", c.X) @Px("top", c.Y - BracketTree.CardHeight / 2) @Px("width", BracketTree.CardWidth)" @key="c.Match.Id">
+                <MatchCard Match="c.Match" HoveredId="_hovered" OnHover="id => _hovered = id" OnSelect="OnSelect" />
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private const double SectionGap = 32;
+
+    [Parameter, EditorRequired] public IReadOnlyList<BracketRoundDto> WinnerRounds { get; set; } = [];
+    [Parameter] public IReadOnlyList<BracketRoundDto> LoserRounds { get; set; } = [];
+    [Parameter] public BracketMatchDto? GrandFinal { get; set; }
+    [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
+
+    private BracketLayout.PlayoffGridLayout _grid = new(0, 0, [], [], []);
+    private Guid? _hovered;
+
+    protected override void OnParametersSet() =>
+        _grid = BracketLayout.ComputePlayoffGrid(WinnerRounds, LoserRounds, GrandFinal, BracketTree.CardWidth, BracketTree.CardHeight,
+            BracketTree.Gap, BracketTree.ConnectorWidth, BracketTree.LabelHeight, SectionGap);
+
+    private static string Num(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private static string Px(string prop, double v) => $"{prop}:{Num(v)}px;";
+}

@@ -1,0 +1,312 @@
+@page "/versenyek/{Id:guid}"
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>@(_tournament?.Name ?? "Verseny") – Adam's family dashboard</PageTitle>
+
+@if (_tournament is not { } t)
+{
+    @if (_notFound)
+    {
+        <div class="sub-empty mt-6">Ez a verseny nem található. <a href="versenyek">Vissza a versenyekhez</a></div>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+}
+else
+{
+    var shape = TournamentShape.For(t.Type, t.GroupStageKind, t.PlayoffKind);
+    <section class="hero sub-hero">
+        <div class="hero-content">
+            <div class="hero-kicker">@t.Type.Label()</div>
+            <div class="hero-head">
+                <div class="sub-hero-name">
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Class="back-btn" Edge="Edge.Start" aria-label="Vissza a versenyekhez"
+                                   title="Vissza" OnClick="@(() => Nav.NavigateTo("versenyek"))" />
+                    <h1 class="hero-title tr-title">@t.Name</h1>
+                </div>
+                <div class="hero-actions">
+                    @if (t.Status == TournamentStatus.Planned)
+                    {
+                        <button type="button" class="hero-btn" @onclick="Edit"><MudIcon Icon="@Icons.Material.Filled.Edit" /> Szerkesztés</button>
+                    }
+                    <button type="button" class="hero-btn hero-btn-icon" @onclick="CopyPublicLink" aria-label="Nézői link másolása" title="Nézői link másolása">
+                        <MudIcon Icon="@Icons.Material.Filled.Share" />
+                    </button>
+                    <a class="hero-btn hero-btn-icon" href="@PublicPath(t)" target="_blank" rel="noopener" aria-label="Nézői oldal megnyitása" title="Nézői oldal megnyitása">
+                        <MudIcon Icon="@Icons.Material.Filled.OpenInNew" />
+                    </a>
+                    <button type="button" class="hero-btn hero-btn-icon" @onclick="Delete" aria-label="Verseny törlése" title="Törlés">
+                        <MudIcon Icon="@Icons.Material.Filled.Delete" />
+                    </button>
+                </div>
+            </div>
+            <div class="hero-meta">
+                <TournamentStatusChip Status="t.Status" />
+                <span class="hero-stat"><b>@Format.Date(t.Date)</b></span>
+                @if (_participants is not null)
+                {
+                    <span class="hero-stat"><b>@_participants.Count</b> résztvevő</span>
+                }
+            </div>
+        </div>
+    </section>
+
+    @* A beállítások indulás után nem változnak, így ez csak referencia: alapból összecsukva. *@
+    <MudExpansionPanels Class="tr-overview" Elevation="0">
+        <MudExpansionPanel Text="Beállítások">
+            <div class="tr-detail">
+                <div class="tr-form-section">Alapok</div>
+                <dl class="tr-rows">
+                    <dt>Dátum</dt><dd>@Format.Date(t.Date)</dd>
+                    <dt>Típus</dt><dd>@t.Type.Label()</dd>
+                    <dt>Eredmény számolása</dt><dd>@t.DefaultScoreType.Label()</dd>
+                </dl>
+                @if (shape.IsGroupStagePlayoff)
+                {
+                    <div class="tr-form-section">Felépítés</div>
+                    <dl class="tr-rows">
+                        <dt>Csoportkör</dt><dd>@t.GroupStageKind.Label()</dd>
+                        <dt>Rájátszás</dt><dd>@t.PlayoffKind.Label()</dd>
+                        @if (shape.UsesRoundRobinGroups)
+                        {
+                            <dt>Csoportok</dt><dd>@t.GroupCount</dd>
+                        }
+                        else
+                        {
+                            <dt>Svájci fordulók</dt><dd>@(t.SwissRounds > 0 ? t.SwissRounds.ToString() : $"{t.ResolvedSwissRounds} (automatikus)")</dd>
+                        }
+                        <dt>Rájátszás mérete</dt><dd>@(t.PlayoffSize > 0 ? $"{t.PlayoffSize} fő" : $"{t.PlayoffCapacity} fő (automatikus)")</dd>
+                    </dl>
+                }
+                <div class="tr-form-section">Meccsformátum</div>
+                <dl class="tr-rows">
+                    @if (shape.ShowsSingleFormat)
+                    {
+                        <dt>Meccsek</dt><dd>@t.DefaultMatchFormat.Label()</dd>
+                    }
+                    @if (shape.IsGroupStagePlayoff)
+                    {
+                        <dt>Csoportmeccsek</dt><dd>@t.GroupStageMatchFormat.Label()</dd>
+                    }
+                    @if (shape.UsesBracketFormats)
+                    {
+                        <dt>@(shape.ShowsAllBracketFormats ? "Győztes ág" : "Rájátszás")</dt><dd>@t.UpperBracketFormat.Label()</dd>
+                    }
+                    @if (shape.ShowsAllBracketFormats)
+                    {
+                        <dt>Vesztes ág</dt><dd>@t.LowerBracketFormat.Label()</dd>
+                    }
+                    @if (!shape.IsRoundRobin)
+                    {
+                        <dt>@(shape.ShowsAllBracketFormats ? "Nagydöntő" : "Döntő")</dt><dd>@t.GrandFinalFormat.Label()</dd>
+                    }
+                </dl>
+                @if (shape.ShowsRules)
+                {
+                    <div class="tr-form-section">Szabályok</div>
+                    <dl class="tr-rows">
+                        @if (shape.PlayoffIsSingleElimination)
+                        {
+                            <dt>Bronzmeccs</dt><dd>@(t.ThirdPlaceEnabled ? "Van" : "Nincs")</dd>
+                        }
+                        @if (shape.ShowsTiebreakerPolicy)
+                        {
+                            <dt>Holtverseny</dt><dd>@t.TiebreakerPolicy.Label()</dd>
+                        }
+                    </dl>
+                }
+                <div class="tr-form-section">Megjegyzés</div>
+                <div class="tr-notes">@(string.IsNullOrWhiteSpace(t.Notes) ? "—" : t.Notes)</div>
+            </div>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    @if (t.Status == TournamentStatus.Planned)
+    {
+        @if (_participants is null)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else
+        {
+            <div class="tr-planned">
+                <ParticipantsEditor TournamentId="t.Id" Type="t.Type" MinPanels="t.MinParticipants" Participants="_participants"
+                                    OnSaved="RosterSaved" UnsavedChanged="v => _rosterUnsaved = v" />
+                @if (shape.UsesRoundRobinGroups)
+                {
+                    <GroupsPreview TournamentId="t.Id" GroupCount="t.GroupCount" Participants="_participants" RosterUnsaved="_rosterUnsaved"
+                                   OnParticipantsChanged="p => _participants = p" OnStarted="LoadAsync" />
+                }
+                else
+                {
+                    <SeedingEditor TournamentId="t.Id" Type="t.Type" Participants="_participants" RosterUnsaved="_rosterUnsaved"
+                                   OnParticipantsChanged="p => _participants = p" OnStarted="LoadAsync" />
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <section class="tr-panel tr-bracket-panel">
+            <div class="tr-panel-head">
+                <h2 class="tr-panel-title">@PanelTitle(t.Type)</h2>
+                @if (_bracket is { } lb && t.Status == TournamentStatus.Running)
+                {
+                    <div class="tr-panel-actions mt-0">
+                        @if (lb.NeedsTiebreakers)
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Balance" Disabled="_busy" OnClick="StartTiebreakers">
+                                Holtverseny eldöntése
+                            </MudButton>
+                        }
+                        @if (lb.GroupStage is { CanStartNextRound: true })
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SkipNext" Disabled="_busy" OnClick="StartSwissRound">
+                                Következő forduló
+                            </MudButton>
+                        }
+                        @if (lb.CanStartPlayoffs)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AccountTree" Disabled="_busy" OnClick="StartPlayoffs">
+                                Rájátszás indítása
+                            </MudButton>
+                        }
+                        @if (lb.CanFinish)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Flag" Disabled="_busy" OnClick="Finish">
+                                Verseny lezárása
+                            </MudButton>
+                        }
+                    </div>
+                }
+            </div>
+            @if (_bracket is not { } b)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            else
+            {
+                <BracketView Bracket="b" OnSelect="SelectCallback" Focus="@_focus" FocusStamp="_focusStamp" />
+            }
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private TournamentDto? _tournament;
+    private IReadOnlyList<ParticipantDto>? _participants;
+    private BracketDto? _bracket;
+    private bool _notFound, _rosterUnsaved, _busy;
+    private string? _focus;
+    private int _focusStamp;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    /// <summary>Betölti a versenyt, és állapottól függően a névsort (tervezett) vagy az ágat (futó, befejezett).</summary>
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _tournament = await Api.GetAsync<TournamentDto>($"api/tournaments/{Id}");
+            _participants = await Api.GetAsync<List<ParticipantDto>>($"api/tournaments/{Id}/participants");
+            _bracket = _tournament.Status == TournamentStatus.Planned ? null : await Api.GetAsync<BracketDto>($"api/tournaments/{Id}/bracket");
+        }
+        catch (ApiException ex) when (ex.StatusCode == 404) { _notFound = true; }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    /// <summary>A mentett névsor; a verseny is újratöltődik, mert a minimális létszám és a rájátszás mérete a névsortól függ.</summary>
+    private async Task RosterSaved(IReadOnlyList<ParticipantDto> saved)
+    {
+        _participants = saved;
+        try { _tournament = await Api.GetAsync<TournamentDto>($"api/tournaments/{Id}"); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static string PanelTitle(TournamentType type) => type switch
+    {
+        TournamentType.RoundRobin => "Körmérkőzés",
+        TournamentType.GroupStagePlayoff => "Csoportkör és rájátszás",
+        _ => "Versenyág",
+    };
+
+    /// <summary>Futó versenyben a meccsre kattintva eredmény rögzíthető; befejezettben minden csak olvasható.</summary>
+    private EventCallback<BracketMatchDto> SelectCallback => _tournament?.Status == TournamentStatus.Running
+        ? EventCallback.Factory.Create<BracketMatchDto>(this, OpenMatch)
+        : default;
+
+    private async Task OpenMatch(BracketMatchDto match)
+    {
+        if (await MatchResultDialog.ShowAsync(Dialogs, Id, match) is { } updated) _bracket = updated;
+    }
+
+    private Task StartTiebreakers() => Lifecycle("Holtverseny eldöntése",
+        "Létrejönnek az egy játszmás holtverseny-meccsek, amelyek egy helyezést eldöntő egyenlőséget feloldanak. Mehet?",
+        "Létrehozás", "start-tiebreakers", "tiebreakers");
+
+    private Task StartSwissRound() => Lifecycle("Következő svájci forduló",
+        "A következő forduló párosítása az aktuális tabellából készül: hasonló mérlegű játékosok találkoznak, és senki nem játszik kétszer ugyanazzal. A már beírt eredmények a rákövetkező forduló párosításáig javíthatók. Mehet?",
+        "Párosítás", "start-swiss-round", "groupStage");
+
+    private Task StartPlayoffs() => Lifecycle("Rájátszás indítása",
+        "A csoportkör tabellái alapján elkészül a rájátszás ága. Indítás után a csoportkör eredményei már nem módosíthatók. Mehet?",
+        "Indítás", "start-playoffs", "playoffs");
+
+    private Task Finish() => Lifecycle("Verseny lezárása",
+        "A lezárás után a verseny befejezett lesz, eredmény már nem módosítható. Mehet?",
+        "Lezárás", "finish", "leaderboard");
+
+    /// <summary>Egy életciklus-lépés megerősítéssel; utána újratölt, és a nézet az érintett fülre ugrik.</summary>
+    private async Task Lifecycle(string title, string message, string yes, string action, string focus)
+    {
+        if (await Dialogs.ShowMessageBoxAsync(title, message, yesText: yes, cancelText: "Mégse") != true) return;
+        _busy = true;
+        try
+        {
+            await Api.PostAsync<TournamentDto>($"api/tournaments/{Id}/{action}");
+            await LoadAsync();
+            _focus = focus;
+            _focusStamp++;
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private static string PublicPath(TournamentDto t) => $"nezo/{Uri.EscapeDataString(t.PublicToken)}";
+
+    /// <summary>A nyilvános, bejelentkezés nélkül nézhető link a vágólapra.</summary>
+    private async Task CopyPublicLink()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", Nav.ToAbsoluteUri(PublicPath(_tournament!)).ToString());
+            Snackbar.Add("A nézői link a vágólapra került.", Severity.Success);
+        }
+        catch { Snackbar.Add("Nem sikerült a vágólapra másolni.", Severity.Error); }
+    }
+
+    private async Task Edit()
+    {
+        if (await TournamentFormDialog.ShowAsync(Dialogs, _tournament) is not null) await LoadAsync();
+    }
+
+    private async Task Delete()
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Verseny törlése", $"Törlöd: „{_tournament!.Name}”? Ez nem vonható vissza.",
+                yesText: "Törlés", cancelText: "Mégse") != true) return;
+        try
+        {
+            await Api.DeleteAsync($"api/tournaments/{Id}");
+            Nav.NavigateTo("versenyek");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

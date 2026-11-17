@@ -1,0 +1,62 @@
+using AdaManagement.Server.Tournaments.Domain.Entities;
+using AdaManagement.Shared.Tournaments;
+
+namespace AdaManagement.Server.Tournaments.Application;
+
+internal static class TournamentMappings
+{
+    public static TournamentDto ToDto(this Tournament tournament) => new(
+        tournament.Id,
+        tournament.Name,
+        tournament.Date,
+        tournament.Notes,
+        tournament.Type,
+        tournament.DefaultMatchFormat,
+        tournament.ThirdPlaceEnabled,
+        tournament.DefaultScoreType,
+        tournament.GroupCount,
+        tournament.TiebreakerPolicy,
+        tournament.GroupStageMatchFormat,
+        tournament.UpperBracketFormat,
+        tournament.LowerBracketFormat,
+        tournament.GrandFinalFormat,
+        tournament.GroupStageKind,
+        tournament.PlayoffKind,
+        tournament.PlayoffSize,
+        tournament.SwissRounds,
+        tournament.PlayoffCapacity,
+        tournament.ResolvedSwissRounds,
+        tournament.MinParticipantsToStart,
+        tournament.Status,
+        tournament.PublicToken,
+        tournament.CreatedAt);
+
+    public static TournamentSummaryDto ToSummary(this Tournament tournament) => new(
+        tournament.Id,
+        tournament.Name,
+        tournament.Date,
+        tournament.Type,
+        tournament.Status,
+        tournament.Participants.Count);
+
+    public static PublicTournamentDto ToPublic(this Tournament tournament) => new(
+        tournament.Name,
+        tournament.Date,
+        tournament.Notes,
+        tournament.Type,
+        tournament.DefaultMatchFormat,
+        tournament.DefaultScoreType,
+        tournament.GroupCount,
+        tournament.TiebreakerPolicy,
+        tournament.GroupStageMatchFormat,
+        tournament.UpperBracketFormat,
+        tournament.LowerBracketFormat,
+        tournament.GrandFinalFormat,
+        tournament.GroupStageKind,
+        tournament.PlayoffKind,
+        tournament.PlayoffCapacity,
+        tournament.ResolvedSwissRounds,
+        tournament.Status,
+        tournament.Participants.ToOrderedDtos(),
+        tournament.Matches.Count > 0 ? BracketProjection.Build(tournament) : null);
+}

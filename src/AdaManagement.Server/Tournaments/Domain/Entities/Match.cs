@@ -1,0 +1,339 @@
+using AdaManagement.Server.Tournaments.Domain.Exceptions;
+using AdaManagement.Shared.Tournaments;
+using DomainMatchFormat = AdaManagement.Shared.Tournaments.MatchFormat;
+using DomainScoreType = AdaManagement.Shared.Tournaments.ScoreType;
+
+// The MatchFormat/ScoreType properties below shadow their own enum type names, so unqualified
+// enum member access (e.g. ScoreType.Points) inside this class's instance methods fails with
+// CS0119; these aliases let call sites stay short instead of fully-qualifying every reference.
+
+namespace AdaManagement.Server.Tournaments.Domain.Entities;
+
+/// <summary>
+/// The primary competitive unit and the source of truth for bracket progression.
+/// A slot (<see cref="ParticipantAId"/>/<see cref="ParticipantBId"/>) is null while it is still
+/// unresolved (to be filled by an upstream match winner). Result mutation is exposed only as
+/// <c>internal</c> members, invoked exclusively through the owning <see cref="Tournament"/>.
+/// </summary>
+public class Match
+{
+    private readonly List<ScoreEntry> _scoreEntries = new();
+
+    private Match()
+    {
+    }
+
+    public Guid Id { get; private set; }
+    public Guid TournamentId { get; private set; }
+    public BracketSegment Segment { get; private set; }
+
+    /// <summary>1-based round number within the segment (round 1 is the earliest).</summary>
+    public int Round { get; private set; }
+
+    /// <summary>0-based position of the match within its round. May be sparse in round 1 (byes).</summary>
+    public int IndexInRound { get; private set; }
+
+    /// <summary>
+    /// Group Stage + Playoff only: the 0-based group a group-stage (<see cref="BracketSegment.RoundRobin"/>)
+    /// match belongs to. Null for playoff matches and for every other tournament type.
+    /// </summary>
+    public int? GroupIndex { get; private set; }
+
+    public Guid? ParticipantAId { get; private set; }
+    public Guid? ParticipantBId { get; private set; }
+
+    public MatchFormat MatchFormat { get; private set; }
+    public MatchStatus Status { get; private set; }
+    public Guid? WinnerId { get; private set; }
+
+    public bool IsDecided => Status is MatchStatus.Completed or MatchStatus.Forfeit;
+
+    /// <summary>The losing participant, once decided; null otherwise.</summary>
+    public Guid? LoserId => WinnerId is null ? null : (WinnerId == ParticipantAId ? ParticipantBId : ParticipantAId);
+
+    /// <summary>
+    /// Set at creation from the tournament's default score type, and - like <see cref="MatchFormat"/> -
+    /// overridable for this match alone when the result is entered.
+    /// </summary>
+    public ScoreType ScoreType { get; private set; }
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    /// <summary>Monotonic, tournament-scoped ordinal assigned when this match is decided; used to find the latest completed match for Undo (FR-UNDO-001).</summary>
+    public long? CompletionSequence { get; private set; }
+
+    /// <summary>
+    /// Double Elimination only: where this match's winner/loser is routed once decided, resolved
+    /// once (after bye-cascade collapse) when the tournament starts and immutable thereafter. Null
+    /// for Single Elimination, which computes its single forward route on the fly instead
+    /// (<see cref="Brackets.SingleEliminationBracket.NextWinnerSlot"/>) and for the Grand Final's
+    /// winner route (there is nowhere further to go).
+    /// </summary>
+    public Guid? WinnerToMatchId { get; private set; }
+    public bool? WinnerToSlotA { get; private set; }
+
+    /// <summary>Double Elimination only: where this match's loser is routed. Null for a Loser Bracket match or the Grand Final (the loser is not routed anywhere further) and for Single Elimination.</summary>
+    public Guid? LoserToMatchId { get; private set; }
+    public bool? LoserToSlotA { get; private set; }
+
+    public IReadOnlyCollection<ScoreEntry> ScoreEntries => _scoreEntries.AsReadOnly();
+
+    internal static Match Create(
+        Guid tournamentId,
+        BracketSegment segment,
+        int round,
+        int indexInRound,
+        Guid? participantAId,
+        Guid? participantBId,
+        MatchFormat matchFormat,
+        ScoreType scoreType,
+        int? groupIndex = null) => new()
+    {
+        Id = Guid.NewGuid(),
+        TournamentId = tournamentId,
+        Segment = segment,
+        Round = round,
+        IndexInRound = indexInRound,
+        GroupIndex = groupIndex,
+        ParticipantAId = participantAId,
+        ParticipantBId = participantBId,
+        MatchFormat = matchFormat,
+        ScoreType = scoreType,
+        Status = MatchStatus.Pending,
+        WinnerId = null
+    };
+
+    /// <summary>
+    /// A Swiss bye: the odd participant out sits the round and is credited the win. Created already
+    /// decided, with no opponent and no games. <see cref="CompletionSequence"/> stays null so the bye
+    /// never counts as "the most recently decided match" - it is structural, not a result, and must
+    /// not be undoable or block the undo of a real match played in the same round.
+    /// </summary>
+    internal static Match CreateBye(Guid tournamentId, int round, int indexInRound, Guid participantId, MatchFormat matchFormat, ScoreType scoreType) => new()
+    {
+        Id = Guid.NewGuid(),
+        TournamentId = tournamentId,
+        Segment = BracketSegment.RoundRobin,
+        Round = round,
+        IndexInRound = indexInRound,
+        ParticipantAId = participantId,
+        ParticipantBId = null,
+        MatchFormat = matchFormat,
+        ScoreType = scoreType,
+        Status = MatchStatus.Completed,
+        WinnerId = participantId
+    };
+
+    /// <summary>Whether this is a Swiss bye - one participant, no opponent, already won. See <see cref="CreateBye"/>.</summary>
+    public bool IsBye => ParticipantAId is not null && ParticipantBId is null && Segment == BracketSegment.RoundRobin;
+
+    // ---- Result entry (BR-013 through BR-020; called only via Tournament) ----
+
+    /// <summary>Persists a (possibly partial) detailed score. Always leaves the match undecided (FR-MATCH-006/007, AC-SCORE-002).</summary>
+    internal void SaveResult(MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries)
+    {
+        EnsureNotDecided();
+        var built = BuildEntries(matchFormat, scoreType, entries);
+
+        ApplyEntries(matchFormat, scoreType, built);
+        WinnerId = null;
+        Status = built.Count > 0 ? MatchStatus.InProgress : MatchStatus.Pending;
+    }
+
+    /// <summary>
+    /// Persists the final detailed score and decides the match. A decisive (odd) format rejects a
+    /// non-decisive score (AC-SCORE-003); a draw-capable format (Best-of-2) instead requires every
+    /// game to be played and may end level, leaving <see cref="WinnerId"/> null (a draw).
+    /// </summary>
+    internal void Complete(
+        MatchFormat matchFormat,
+        ScoreType scoreType,
+        IReadOnlyList<ScoreEntryInput> entries,
+        long completionSequence,
+        DateTimeOffset completedAt)
+    {
+        EnsureNotDecided();
+        var built = BuildEntries(matchFormat, scoreType, entries);
+
+        var winsA = built.Count(e => e.ParticipantAWon);
+        var winsB = built.Count - winsA;
+
+        Guid? winnerId;
+        if (matchFormat.AllowsDraw())
+        {
+            if (built.Count != matchFormat.MaxGames())
+            {
+                throw new DomainException($"{matchFormat} meccsben mind a {matchFormat.MaxGames()} játszmát le kell játszani.");
+            }
+
+            winnerId = winsA > winsB ? ParticipantAId : winsB > winsA ? ParticipantBId : null;
+        }
+        else
+        {
+            var required = matchFormat.RequiredWins();
+            if (winsA >= required)
+            {
+                winnerId = ParticipantAId!.Value;
+            }
+            else if (winsB >= required)
+            {
+                winnerId = ParticipantBId!.Value;
+            }
+            else
+            {
+                throw new DomainException("Még egyik fél sem érte el a győzelemhez szükséges nyert játszmákat.");
+            }
+        }
+
+        ApplyEntries(matchFormat, scoreType, built);
+        WinnerId = winnerId;
+        Status = MatchStatus.Completed;
+        CompletedAt = completedAt;
+        CompletionSequence = completionSequence;
+    }
+
+    private void ApplyEntries(MatchFormat matchFormat, ScoreType scoreType, List<ScoreEntry> built)
+    {
+        MatchFormat = matchFormat;
+        ScoreType = scoreType;
+        _scoreEntries.Clear();
+        _scoreEntries.AddRange(built);
+    }
+
+    /// <summary>Completes the match by forfeit. Detailed scores are not required and any previously saved partial score is left untouched (BR-020, FR-FORFEIT-001..004).</summary>
+    internal void CompleteAsForfeit(Guid winnerId, long completionSequence, DateTimeOffset completedAt)
+    {
+        EnsureNotDecided();
+        if (winnerId != ParticipantAId && winnerId != ParticipantBId)
+        {
+            throw new DomainException("Feladásnál a győztes csak a két játékos egyike lehet.");
+        }
+
+        WinnerId = winnerId;
+        Status = MatchStatus.Forfeit;
+        CompletedAt = completedAt;
+        CompletionSequence = completionSequence;
+    }
+
+    /// <summary>
+    /// Double Elimination only: records the resolved (post bye-cascade) forward routes for this
+    /// match. Called exactly once per match, by <see cref="Brackets.DoubleEliminationBracket"/>
+    /// while building the graph at tournament start; never recomputed afterward.
+    /// </summary>
+    internal void SetRoutes(Guid? winnerToMatchId, bool? winnerToSlotA, Guid? loserToMatchId, bool? loserToSlotA)
+    {
+        WinnerToMatchId = winnerToMatchId;
+        WinnerToSlotA = winnerToSlotA;
+        LoserToMatchId = loserToMatchId;
+        LoserToSlotA = loserToSlotA;
+    }
+
+    /// <summary>Fills an empty downstream slot with an advancing participant (BR-021).</summary>
+    internal void ResolveSlot(bool slotA, Guid participantId)
+    {
+        if (slotA)
+        {
+            if (ParticipantAId is not null)
+            {
+                throw new DomainException("Az A hely már foglalt.");
+            }
+
+            ParticipantAId = participantId;
+        }
+        else
+        {
+            if (ParticipantBId is not null)
+            {
+                throw new DomainException("A B hely már foglalt.");
+            }
+
+            ParticipantBId = participantId;
+        }
+    }
+
+    /// <summary>Reverts a slot filled by advancement, used by Undo (FR-UNDO-003).</summary>
+    internal void ClearSlot(bool slotA, Guid expectedParticipantId)
+    {
+        if (slotA)
+        {
+            if (ParticipantAId != expectedParticipantId)
+            {
+                throw new DomainException("Az A helyen nem a várt játékos áll.");
+            }
+
+            ParticipantAId = null;
+        }
+        else
+        {
+            if (ParticipantBId != expectedParticipantId)
+            {
+                throw new DomainException("A B helyen nem a várt játékos áll.");
+            }
+
+            ParticipantBId = null;
+        }
+    }
+
+    /// <summary>Reverts a Completed/Forfeit match back to its pre-decision state. Detailed scores are preserved (FR-UNDO-004/005).</summary>
+    internal void Undo()
+    {
+        if (Status is not (MatchStatus.Completed or MatchStatus.Forfeit))
+        {
+            throw new DomainException("Csak lezárt vagy feladott meccs vonható vissza.");
+        }
+
+        WinnerId = null;
+        CompletedAt = null;
+        CompletionSequence = null;
+        Status = _scoreEntries.Count > 0 ? MatchStatus.InProgress : MatchStatus.Pending;
+    }
+
+    private void EnsureNotDecided()
+    {
+        if (Status is MatchStatus.Completed or MatchStatus.Forfeit)
+        {
+            throw new DomainException("Ez a meccs már eldőlt, nem szerkeszthető.");
+        }
+
+        if (ParticipantAId is null || ParticipantBId is null)
+        {
+            throw new DomainException("Eredményt csak akkor lehet rögzíteni, ha mindkét játékos megvan.");
+        }
+    }
+
+    private List<ScoreEntry> BuildEntries(MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries)
+    {
+        var maxGames = matchFormat.MaxGames();
+        if (entries.Count > maxGames)
+        {
+            throw new DomainException($"{matchFormat} meccsben legfeljebb {maxGames} játszma lehet.");
+        }
+
+        var built = new List<ScoreEntry>(entries.Count);
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+
+            if (scoreType == DomainScoreType.Points && (entry.ScoreA is null || entry.ScoreB is null))
+            {
+                throw new DomainException("Pontos számolásnál minden játszmához mindkét félnek kell pontszám.");
+            }
+
+            if (entry.ScoreA is not null && entry.ScoreB is not null)
+            {
+                if (entry.ScoreA == entry.ScoreB)
+                {
+                    throw new DomainException("Egy játszma nem végződhet döntetlennel.");
+                }
+
+                if (entry.ParticipantAWon != entry.ScoreA > entry.ScoreB)
+                {
+                    throw new DomainException("A megadott győztes nem egyezik a beírt eredménnyel.");
+                }
+            }
+
+            built.Add(ScoreEntry.Create(Id, i + 1, entry.ScoreA, entry.ScoreB, entry.ParticipantAWon));
+        }
+
+        return built;
+    }
+}

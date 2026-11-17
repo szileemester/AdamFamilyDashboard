@@ -15,6 +15,14 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 - **Szakik**: megbízható szakemberek (foglalkozás, név, telefon, e-mail, weboldal, megjegyzés) kártyákon,
   foglalkozás szerinti sorrendben. Keresés foglalkozásra (ékezet nélkül is); a szaki ablakából az adatai
   „Címke: érték” soronként a vágólapra másolhatók.
+- **Versenyek** (az egykori Adaminator): egyenes kiesés (bronzmeccs opcionális), dupla kiesés, körmérkőzés,
+  csoportkör + rájátszás (körmérkőzéses csoportok vagy svájci rendszer; egyenes vagy dupla kieséses rájátszás).
+  Résztvevők emojival, sorsolt és átrendezhető kiemelés, erőnyerők. Meccsformátum 1 játszmától 7-ből 4-ig
+  (2 játszmánál döntetlen is lehet), játszmás vagy pontos számolás. Eredményrögzítés játszmánként, feladás, az utolsó
+  eldőlt meccs visszavonása, holtverseny-meccsek, végeredmény, tabellák.
+  Minden versenynek van **nyilvános, csak olvasható nézői linkje** (`/nezo/{token}`, bejelentkezés nélkül).
+- **Unmatched** (`/unmatched`, a menüben nincs): a házi Unmatched pontozótábla képregényborítóként, Fiúk – Lányok.
+  Bárki megnézheti a linkkel; a szerkesztő a VS-jelvény 5 gyors koppintására nyílik, menteni csak bejelentkezve lehet.
 - **Témák**: Piros és Kék (mozgó háttér), Sötét és Világos (statikus). Eszközönként tárolódik.
 
 ## Felépítés
@@ -23,8 +31,9 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
 |---|---|
 | `src/AdaManagement.Server` | ASP.NET Core minimal API, EF Core (SQL Server), BFF Google login. Ez szolgálja ki a WASM klienst is. |
 | `src/AdaManagement.Client` | Blazor WebAssembly PWA, MudBlazor |
-| `src/AdaManagement.Shared` | DTO-k, közös születésnap-számolás |
-| `tests/AdaManagement.Tests` | xUnit: doménlogika (ismétlődés, generálás, születésnap), és végpont-tesztek valódi SQL Serveren (Testcontainers, Docker kell hozzá) |
+| `src/AdaManagement.Shared` | DTO-k, közös születésnap-számolás, a versenyág rajzának számítása (`Tournaments/BracketLayout.cs`) |
+| `src/AdaManagement.Server/Tournaments` | A versenymodul: Domain (ágak, sorsolás, tabella), Application (szolgáltatások, validátorok), EF-leképezés a `tournament` sémában |
+| `tests/AdaManagement.Tests` | xUnit: doménlogika (ismétlődés, generálás, születésnap, versenyágak), és végpont-tesztek valódi SQL Serveren (Testcontainers, Docker kell hozzá) |
 | `infra/main.bicep` | Azure: App Service F1 + Azure SQL free offer + 1 €-s budget riasztás |
 | `.github/workflows/deploy.yml` | teszt → publish → EF migration bundle → deploy |
 
@@ -38,6 +47,13 @@ Fontosabb döntések:
   CSRF ellen: SameSite=Lax cookie, és minden nem-GET `/api` hívásnak `X-Ada-Client` fejlécet kell küldenie;
   a kijelentkezés csak saját oldalról (Origin-ellenőrzés). Az app nem ágyazható be idegen oldalba (`frame-ancestors 'none'`).
 - **Időzóna:** a „ma” mindig Europe/Budapest szerint számolódik.
+- **Versenyek:** az Adaminator Domain és Application rétege lényegében változatlanul jött át (saját névtérben, magyar
+  hibaüzenetekkel), a felület Blazorban újra lett írva. Nincs időzített frissítés: az állás oldalbetöltéskor vagy a
+  Frissítés gombra töltődik, így a nézői oldal sem tartja ébren az SQL-t.
+- **Nyilvános végpontok:** az `/api/public` csoport bejelentkezés nélkül, csak olvasva érhető el (nézői oldal a titkos
+  tokennel, Unmatched tábla). Minden írás az `/api` alatt marad, bejelentkezéshez kötve.
+- **Karakterképek:** az Unmatched 32 képe (`wwwroot/characters/`) nincs a service worker előtöltésében, csak az oldal
+  megnyitásakor töltődik.
 
 ## Helyi futtatás
 

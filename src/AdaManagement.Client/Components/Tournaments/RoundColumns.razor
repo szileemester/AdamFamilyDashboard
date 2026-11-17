@@ -1,0 +1,22 @@
+@* Fordulók egyszerű oszlopokban, összekötő vonalak nélkül (körmérkőzés, és amíg a többi forma saját nézetet nem kap). *@
+<div class="tr-tree-scroll" data-drag-scroll>
+    <div class="tr-columns">
+        @foreach (var round in Rounds)
+        {
+            <div class="tr-column">
+                <div class="tr-round-title">@round.Title</div>
+                @foreach (var match in round.Matches)
+                {
+                    <MatchCard Match="match" HoveredId="_hovered" OnHover="id => _hovered = id" OnSelect="OnSelect" @key="match.Id" />
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<BracketRoundDto> Rounds { get; set; } = [];
+    [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
+
+    private Guid? _hovered;
+}

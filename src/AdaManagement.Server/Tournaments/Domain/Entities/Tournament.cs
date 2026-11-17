@@ -1,0 +1,1480 @@
+using AdaManagement.Server.Tournaments.Domain.Brackets;
+using AdaManagement.Server.Tournaments.Domain.Exceptions;
+using AdaManagement.Shared.Tournaments;
+
+namespace AdaManagement.Server.Tournaments.Domain.Entities;
+
+/// <summary>
+/// A single competitive event managed in Adaminator and the aggregate root for its participants
+/// and matches. Matches are the source of truth; the bracket is a projection of them.
+/// </summary>
+public class Tournament
+{
+    public const int NameMaxLength = TournamentLimits.NameMaxLength;
+    public const int NotesMaxLength = TournamentLimits.NotesMaxLength;
+    public const int MinParticipants = TournamentLimits.MinParticipants;
+    public const int MaxParticipants = TournamentLimits.MaxParticipants;
+
+    /// <summary>The most Swiss rounds an admin may schedule - a full round robin over the largest roster.</summary>
+    public const int MaxSwissRounds = MaxParticipants - 1;
+
+    private readonly List<Participant> _participants = new();
+    private readonly List<Match> _matches = new();
+
+    // Required by EF Core; not used directly by application code.
+    private Tournament()
+    {
+    }
+
+    public Guid Id { get; private set; }
+    public string Name { get; private set; } = string.Empty;
+    public DateOnly Date { get; private set; }
+    public string? Notes { get; private set; }
+    public TournamentType Type { get; private set; }
+    public MatchFormat DefaultMatchFormat { get; private set; }
+    public ScoreType DefaultScoreType { get; private set; }
+
+    /// <summary>Third Place Match is only ever enabled for a single-elimination bracket - a standalone Single Elimination tournament, or a Group Stage + Playoff whose playoff is single elimination (BR-006, FR-TOUR-007/008).</summary>
+    public bool ThirdPlaceEnabled { get; private set; }
+
+    /// <summary>Group Stage + Playoff with round-robin groups: how many groups the roster is drawn into. 0 for a Swiss group stage and for every other type.</summary>
+    public int GroupCount { get; private set; }
+
+    /// <summary>Group Stage + Playoff only: how the group stage is played. Ignored by every other type.</summary>
+    public GroupStageKind GroupStageKind { get; private set; }
+
+    /// <summary>Group Stage + Playoff only: the playoff's elimination structure. Ignored by every other type.</summary>
+    public PlayoffKind PlayoffKind { get; private set; }
+
+    /// <summary>
+    /// Group Stage + Playoff only: the admin-chosen playoff cut, or 0 for "the largest capacity the
+    /// roster fills". Kept as the raw choice so an untouched tournament keeps tracking its roster.
+    /// </summary>
+    public int PlayoffSize { get; private set; }
+
+    /// <summary>Group Stage + Playoff with a Swiss group stage: the admin-chosen round count, or 0 for the ceil(log2 n) default.</summary>
+    public int SwissRounds { get; private set; }
+
+    /// <summary>Group Stage + Playoff: how many participants actually reach the playoff.</summary>
+    public int PlayoffCapacity =>
+        PlayoffSize > 0 ? PlayoffSize : GroupStagePlayoffBracket.LargestCapacityFor(_participants.Count);
+
+    /// <summary>Group Stage + Playoff with a Swiss group stage: how many rounds it actually plays.</summary>
+    public int ResolvedSwissRounds =>
+        SwissRounds > 0 ? SwissRounds : SwissBracket.DefaultRounds(_participants.Count);
+
+    /// <summary>Whether this is a Group Stage + Playoff whose group stage is one Swiss pool rather than drawn groups.</summary>
+    public bool UsesSwissGroupStage => Type == TournamentType.GroupStagePlayoff && GroupStageKind == GroupStageKind.Swiss;
+
+    /// <summary>
+    /// Fewest participants these settings allow the tournament to start with - the highest floor any of
+    /// <see cref="Start"/>'s validations imposes. Only the admin's explicit choices raise it; a setting
+    /// left on Auto derives itself from the roster and so constrains nothing.
+    ///
+    /// Exposed on the DTO so the roster editor can floor its player count from the same code that will
+    /// judge it, rather than restating these rules client-side where they would drift.
+    /// </summary>
+    public int MinParticipantsToStart
+    {
+        get
+        {
+            if (Type != TournamentType.GroupStagePlayoff)
+            {
+                return MinParticipants;
+            }
+
+            // Every Group Stage + Playoff has to fill the smallest playoff there is.
+            var minimum = DoubleEliminationBracket.MinCapacity;
+
+            // A chosen cut needs a roster that fills it (GroupStagePlayoffBracket.ValidatePlayoffCapacity).
+            if (PlayoffSize > 0)
+            {
+                minimum = Math.Max(minimum, PlayoffSize);
+            }
+
+            if (UsesSwissGroupStage)
+            {
+                // n players supply at most n-1 rounds of fresh pairings (SwissBracket.ValidateShape).
+                if (SwissRounds > 0)
+                {
+                    minimum = Math.Max(minimum, SwissRounds + 1);
+                }
+            }
+            else
+            {
+                // Each drawn group plays a round robin, so each needs two (GroupStagePlayoffBracket.ValidateShape).
+                minimum = Math.Max(minimum, GroupCount * 2);
+            }
+
+            return minimum;
+        }
+    }
+
+    /// <summary>
+    /// How many admin-chosen first-round byes this tournament's shape needs. The one definition, shared
+    /// by seeding and by bracket-preview generation. Group Stage + Playoff never has one: its groups are
+    /// drawn, a Swiss pool sits a player out per round, and its playoff is always a clean power of two.
+    /// </summary>
+    public int RequiredByes => Type switch
+    {
+        TournamentType.DoubleElimination => DoubleEliminationBracket.ComputeRequiredByes(_participants.Count),
+        TournamentType.RoundRobin => RoundRobinBracket.ComputeRequiredByes(_participants.Count),
+        TournamentType.GroupStagePlayoff => 0,
+        _ => SingleEliminationBracket.ComputeRequiredByes(_participants.Count)
+    };
+
+    /// <summary>How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff.</summary>
+    public TiebreakerPolicy TiebreakerPolicy { get; private set; }
+
+    /// <summary>
+    /// Group Stage + Playoff only: how the group matches are played and scored - any format including
+    /// the draw-capable <see cref="MatchFormat.Bo2"/> (ranked by games won). Equal to
+    /// <see cref="DefaultMatchFormat"/> for every other type.
+    /// </summary>
+    public MatchFormat GroupStageMatchFormat { get; private set; }
+
+    /// <summary>Double Elimination and Group Stage + Playoff only: the Winner Bracket's match format. Equal to <see cref="DefaultMatchFormat"/> for every other type.</summary>
+    public MatchFormat UpperBracketFormat { get; private set; }
+
+    /// <summary>Double Elimination and Group Stage + Playoff only: the Loser Bracket's match format. Equal to <see cref="DefaultMatchFormat"/> for every other type.</summary>
+    public MatchFormat LowerBracketFormat { get; private set; }
+
+    /// <summary>Double Elimination and Group Stage + Playoff only: the Grand Final's match format. Equal to <see cref="DefaultMatchFormat"/> for every other type.</summary>
+    public MatchFormat GrandFinalFormat { get; private set; }
+
+    /// <summary>Whether group standings rank by total games won (a Best-of-2 group stage) rather than match wins.</summary>
+    public bool RanksGroupsByGamesWon => GroupStageMatchFormat == MatchFormat.Bo2;
+
+    /// <summary>The match format for a playoff segment - shared by every bracket builder.</summary>
+    internal MatchFormat PlayoffFormatFor(BracketSegment segment) => segment switch
+    {
+        BracketSegment.Winner => UpperBracketFormat,
+        BracketSegment.Loser => LowerBracketFormat,
+        BracketSegment.GrandFinal => GrandFinalFormat,
+        _ => DefaultMatchFormat,
+    };
+
+    /// <summary>
+    /// The match format for one match of a winner-side tree, whose last round is the deciding match and
+    /// may be played longer than the rest. The one place that rule lives, so every single-elimination
+    /// shape - standalone or a playoff - resolves it the same way.
+    /// </summary>
+    internal MatchFormat FormatForWinnerRound(int round, int lastRound) =>
+        round == lastRound ? GrandFinalFormat : PlayoffFormatFor(BracketSegment.Winner);
+
+    public TournamentStatus Status { get; private set; }
+
+    /// <summary>
+    /// Opaque, non-sequential identifier used for the public read-only view so that
+    /// internal database identity is not exposed (NFR security guidance).
+    /// </summary>
+    public string PublicToken { get; private set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    public IReadOnlyCollection<Participant> Participants => _participants.AsReadOnly();
+    public IReadOnlyCollection<Match> Matches => _matches.AsReadOnly();
+
+    /// <summary>True once a bracket has been generated (all participants have a seed).</summary>
+    public bool IsSeeded => _participants.Count >= MinParticipants && _participants.All(p => p.Seed > 0);
+
+    public static Tournament Create(
+        string name,
+        DateOnly date,
+        string? notes,
+        TournamentType type,
+        MatchFormat defaultMatchFormat,
+        ScoreType defaultScoreType,
+        bool thirdPlaceEnabled,
+        DateTimeOffset createdAt,
+        int groupCount = 0,
+        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
+        MatchFormat? groupStageMatchFormat = null,
+        MatchFormat? upperBracketFormat = null,
+        MatchFormat? lowerBracketFormat = null,
+        MatchFormat? grandFinalFormat = null,
+        GroupStageKind groupStageKind = GroupStageKind.RoundRobin,
+        PlayoffKind playoffKind = PlayoffKind.DoubleElimination,
+        int playoffSize = 0,
+        int swissRounds = 0)
+    {
+        var tournament = new Tournament
+        {
+            Id = Guid.NewGuid(),
+            Status = TournamentStatus.Planned,
+            PublicToken = GenerateToken(),
+            CreatedAt = createdAt
+        };
+
+        tournament.SetDetails(
+            name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy,
+            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat,
+            groupStageKind, playoffKind, playoffSize, swissRounds);
+        return tournament;
+    }
+
+    /// <summary>Updates editable settings. Allowed only while Planned (FR-TOUR-002, BR-002).</summary>
+    public void UpdateDetails(
+        string name,
+        DateOnly date,
+        string? notes,
+        TournamentType type,
+        MatchFormat defaultMatchFormat,
+        ScoreType defaultScoreType,
+        bool thirdPlaceEnabled,
+        int groupCount = 0,
+        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
+        MatchFormat? groupStageMatchFormat = null,
+        MatchFormat? upperBracketFormat = null,
+        MatchFormat? lowerBracketFormat = null,
+        MatchFormat? grandFinalFormat = null,
+        GroupStageKind groupStageKind = GroupStageKind.RoundRobin,
+        PlayoffKind playoffKind = PlayoffKind.DoubleElimination,
+        int playoffSize = 0,
+        int swissRounds = 0)
+    {
+        EnsurePlanned("szerkeszthető");
+        SetDetails(
+            name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy,
+            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat,
+            groupStageKind, playoffKind, playoffSize, swissRounds);
+    }
+
+    // ---- Participant management (Planned only) ----
+
+    public Participant AddParticipant(string name, string? emoji = null)
+    {
+        EnsurePlanned("módosítható");
+        if (_participants.Count >= MaxParticipants)
+        {
+            throw TooManyParticipants();
+        }
+
+        var trimmed = (name ?? string.Empty).Trim();
+        EnsureUniqueName(trimmed, excludeId: null);
+
+        // Append rather than reuse a gap left by a removal, so an existing roster never reorders.
+        var position = _participants.Count == 0 ? 1 : _participants.Max(p => p.Position) + 1;
+        var participant = Participant.Create(Id, trimmed, position, emoji);
+        _participants.Add(participant);
+        ResetSeeding();
+        return participant;
+    }
+
+    public void RenameParticipant(Guid participantId, string name)
+    {
+        EnsurePlanned("módosítható");
+        var participant = FindParticipant(participantId);
+        var trimmed = (name ?? string.Empty).Trim();
+        EnsureUniqueName(trimmed, excludeId: participantId);
+        participant.Rename(trimmed);
+    }
+
+    /// <summary>
+    /// Sets, changes, or clears a participant's emoji - like every other roster edit, only while the
+    /// tournament is still Planned.
+    /// </summary>
+    public void SetParticipantEmoji(Guid participantId, string? emoji)
+    {
+        EnsurePlanned("módosítható");
+        FindParticipant(participantId).SetEmoji(emoji);
+    }
+
+    public void RemoveParticipant(Guid participantId)
+    {
+        EnsurePlanned("módosítható");
+        var participant = FindParticipant(participantId);
+        _participants.Remove(participant);
+        ResetSeeding();
+    }
+
+    /// <summary>
+    /// Replaces the whole roster in one go, in the order given: entries carrying an existing id are
+    /// kept (renamed and re-emoji'd as needed), entries without one are created, and anyone absent is
+    /// removed. <see cref="Participant.Position"/> becomes the entry's place in the list.
+    ///
+    /// This exists because the roster editor commits every panel at once. Applying that as a stream of
+    /// single-participant calls would be one HTTP round trip and one transaction per player, and a
+    /// failure partway would leave the roster half-written - whereas here the whole thing validates
+    /// before anything changes, so it either lands completely or not at all.
+    /// </summary>
+    public void ReplaceRoster(IReadOnlyList<RosterEntry> entries)
+    {
+        EnsurePlanned("módosítható");
+        if (entries.Count > MaxParticipants)
+        {
+            throw TooManyParticipants();
+        }
+
+        // Validate everything up front: a roster that fails halfway is worse than one that is refused.
+        // Names go through Participant's own normalizer so this pass enforces every name rule there is,
+        // not a hand-copied subset - a rule it missed would surface mid-apply and half-write the roster.
+        var normalized = entries
+            .Select(e => (e.Id, Name: Participant.NormalizeName(e.Name), e.Emoji))
+            .ToList();
+
+        var missing = normalized.FirstOrDefault(e => e.Id is { } id && _participants.All(p => p.Id != id));
+        if (missing.Id is { } missingId)
+        {
+            throw new DomainException("Az egyik résztvevő nincs ebben a versenyben.");
+        }
+
+        // Distinct from EnsureUniqueName, which checks one name against the stored roster: here the
+        // submitted list has to be internally consistent, since it replaces that roster wholesale.
+        var duplicate = normalized
+            .GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw DuplicateName(duplicate.First().Name);
+        }
+
+        var keptIds = normalized.Where(e => e.Id.HasValue).Select(e => e.Id!.Value).ToHashSet();
+        _participants.RemoveAll(p => !keptIds.Contains(p.Id));
+
+        // Position carries the order, so the backing list is left however it happens to be - every
+        // reader sorts by Position (see ParticipantMappings.ToOrderedDtos).
+        for (var position = 1; position <= normalized.Count; position++)
+        {
+            var entry = normalized[position - 1];
+            if (entry.Id is { } id)
+            {
+                var existing = FindParticipant(id);
+                existing.Rename(entry.Name);
+                existing.SetEmoji(entry.Emoji);
+                existing.SetPosition(position);
+            }
+            else
+            {
+                _participants.Add(Participant.Create(Id, entry.Name, position, entry.Emoji));
+            }
+        }
+
+        ResetSeeding();
+    }
+
+    // ---- Bracket preview (Planned only) ----
+
+    /// <summary>
+    /// Applies a seed ordering and bye selection to the current roster. Used both by random
+    /// generation and by manual preview edits. Requires exactly the number of byes the bracket size
+    /// demands, and every participant to appear exactly once.
+    /// </summary>
+    public void ApplySeeding(IReadOnlyList<Guid> orderedParticipantIds, IReadOnlyCollection<Guid> byeParticipantIds)
+    {
+        EnsurePlanned("módosítható");
+        if (_participants.Count < MinParticipants)
+        {
+            throw new DomainException($"Az ág elkészítéséhez legalább {MinParticipants} résztvevő kell.");
+        }
+
+        var rosterIds = _participants.Select(p => p.Id).ToHashSet();
+
+        if (orderedParticipantIds.Count != rosterIds.Count ||
+            orderedParticipantIds.Distinct().Count() != rosterIds.Count ||
+            !orderedParticipantIds.All(rosterIds.Contains))
+        {
+            throw new DomainException("A kiemelési sorrendben minden résztvevő pontosan egyszer szerepeljen.");
+        }
+
+        var byeSet = byeParticipantIds.ToHashSet();
+        if (byeSet.Count != byeParticipantIds.Count || !byeSet.All(rosterIds.Contains))
+        {
+            throw new DomainException("Az erőnyerők kijelölése hibás.");
+        }
+
+        var requiredByes = RequiredByes;
+        if (byeSet.Count != requiredByes)
+        {
+            throw new DomainException($"Pontosan {requiredByes} erőnyerőt kell kijelölni; most {byeSet.Count} van kijelölve.");
+        }
+
+        for (var i = 0; i < orderedParticipantIds.Count; i++)
+        {
+            var participant = _participants.First(p => p.Id == orderedParticipantIds[i]);
+            participant.SetSeed(i + 1, byeSet.Contains(participant.Id));
+        }
+    }
+
+    /// <summary>
+    /// Group Stage + Playoff only: randomly, balanced, deals the roster into <see cref="GroupCount"/>
+    /// groups (regenerate-able while Planned). Each participant gets a within-group order that drives
+    /// its group's round-robin schedule.
+    /// </summary>
+    public void DrawGroups()
+    {
+        EnsurePlanned("módosítható");
+        if (Type != TournamentType.GroupStagePlayoff)
+        {
+            throw new DomainException("Csoportsorsolás csak csoportkör + rájátszás versenyben van.");
+        }
+
+        if (UsesSwissGroupStage)
+        {
+            throw new DomainException("A svájci csoportkör egyetlen mezőny, nincs mit csoportokba sorsolni.");
+        }
+
+        GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
+
+        // Group sizes need not be equal - a remainder simply makes the earlier groups one bigger.
+        var shuffled = _participants.OrderBy(_ => Random.Shared.Next()).ToList();
+        var sizes = GroupStagePlayoffBracket.GroupSizes(_participants.Count, GroupCount);
+        var next = 0;
+        for (var g = 0; g < GroupCount; g++)
+        {
+            for (var seat = 0; seat < sizes[g]; seat++)
+            {
+                shuffled[next++].SetGroup(groupIndex: g, seedWithinGroup: seat + 1);
+            }
+        }
+    }
+
+    /// <summary>Group Stage + Playoff: how many participants each group actually holds (sizes can differ by one).</summary>
+    public IReadOnlyList<int> CurrentGroupSizes() =>
+        Enumerable.Range(0, GroupCount).Select(g => _participants.Count(p => p.GroupIndex == g)).ToList();
+
+    // ---- Start (Planned -> Running) ----
+
+    public void Start()
+    {
+        EnsurePlanned("indítható");
+        if (_participants.Count is < MinParticipants or > MaxParticipants)
+        {
+            throw new DomainException($"Az indításhoz {MinParticipants} és {MaxParticipants} közötti résztvevő kell.");
+        }
+
+        if (UsesSwissGroupStage)
+        {
+            // A Swiss pool has no draw; round 1 is paired from the seed order, so it needs the same
+            // generated bracket preview every non-group type does.
+            if (!IsSeeded)
+            {
+                throw new DomainException("Indítás előtt készítsd el a párosítási sorrendet.");
+            }
+
+            SwissBracket.ValidateShape(_participants.Count, ResolvedSwissRounds);
+            GroupStagePlayoffBracket.ValidatePlayoffCapacity(_participants.Count, PlayoffCapacity);
+        }
+        else if (Type == TournamentType.GroupStagePlayoff)
+        {
+            if (_participants.Any(p => p.GroupIndex is null))
+            {
+                throw new DomainException("Indítás előtt sorsold ki a csoportokat.");
+            }
+
+            GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
+            GroupStagePlayoffBracket.ValidatePlayoffCapacity(_participants.Count, PlayoffCapacity);
+        }
+        else if (!IsSeeded)
+        {
+            throw new DomainException("Indítás előtt készítsd el az ágat.");
+        }
+
+        // BuildMatches re-validates the bye count against the bracket size. Group Stage + Playoff
+        // starts with only the group stage - the playoff is built later by StartPlayoffs() - and a Swiss
+        // group stage starts with only round 1, since later pairings depend on results.
+        var matches = Type switch
+        {
+            TournamentType.DoubleElimination => DoubleEliminationBracket.BuildMatches(this),
+            TournamentType.RoundRobin => RoundRobinBracket.BuildMatches(this),
+            TournamentType.GroupStagePlayoff when UsesSwissGroupStage =>
+                SwissBracket.BuildRound(this, 1, _participants.OrderBy(p => p.Seed).Select(p => p.Id).ToList()),
+            TournamentType.GroupStagePlayoff => GroupStagePlayoffBracket.BuildGroupStage(this),
+            _ => SingleEliminationBracket.BuildMatches(this)
+        };
+        _matches.AddRange(matches);
+        Status = TournamentStatus.Running;
+    }
+
+    // ---- Match results ----
+
+    /// <summary>Saves a (possibly partial) detailed score. Never decides the match (FR-MATCH-006/007).</summary>
+    public void SaveMatchResult(Guid matchId, MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries)
+    {
+        var match = FindMatch(matchId);
+        EnsureFormatFitsSegment(match, matchFormat);
+        match.SaveResult(matchFormat, scoreType, entries);
+    }
+
+    /// <summary>
+    /// A result may override the format for its own match, but not into one the tournament's settings
+    /// could never have chosen for that match. Only the group stage of a round-robin-grouped Group Stage
+    /// + Playoff may allow draws (the same rule <see cref="SetDetails"/> applies to the settings), so
+    /// without this the override is a way round it: a Best-of-2 bracket match completes with no winner
+    /// and nobody to advance, and a Best-of-2 tie-breaker can end level and break no tie at all.
+    /// </summary>
+    private void EnsureFormatFitsSegment(Match match, MatchFormat matchFormat)
+    {
+        if (!matchFormat.AllowsDraw())
+        {
+            return;
+        }
+
+        if (match.Segment != BracketSegment.RoundRobin || Type != TournamentType.GroupStagePlayoff)
+        {
+            throw new DomainException("Döntetlen (Bo2) csak a csoportkörben lehet.");
+        }
+
+        if (UsesSwissGroupStage)
+        {
+            throw new DomainException("Svájci csoportkörben nem lehet Bo2: válassz döntős formátumot.");
+        }
+    }
+
+    /// <summary>Saves the deciding detailed score, sets the winner and advances it (BR-018 through BR-021).</summary>
+    public void CompleteMatch(
+        Guid matchId,
+        MatchFormat matchFormat,
+        ScoreType scoreType,
+        IReadOnlyList<ScoreEntryInput> entries,
+        DateTimeOffset completedAt)
+    {
+        var match = FindMatch(matchId);
+        EnsureFormatFitsSegment(match, matchFormat);
+        match.Complete(matchFormat, scoreType, entries, NextCompletionSequence(), completedAt);
+        Advance(match);
+    }
+
+    /// <summary>Completes a match by forfeit; the selected winner advances normally (BR-020, FR-FORFEIT-001..004).</summary>
+    public void ForfeitMatch(Guid matchId, Guid winnerId, DateTimeOffset completedAt)
+    {
+        var match = FindMatch(matchId);
+        match.CompleteAsForfeit(winnerId, NextCompletionSequence(), completedAt);
+        Advance(match);
+    }
+
+    /// <summary>True once every deciding match is decided and the admin can finish the tournament by hand.</summary>
+    public bool CanFinish => Status == TournamentStatus.Running && IsReadyToFinish();
+
+    /// <summary>
+    /// Manually transitions a Running tournament to Finished. Finishing is a deliberate admin action,
+    /// not automatic - completing the last match only makes <see cref="CanFinish"/> true.
+    /// </summary>
+    public void Finish()
+    {
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("Csak futó verseny zárható le.");
+        }
+
+        if (!IsReadyToFinish())
+        {
+            throw new DomainException("A verseny csak akkor zárható le, ha minden meccs eldőlt.");
+        }
+
+        Status = TournamentStatus.Finished;
+    }
+
+    /// <summary>True once the group stage is complete (and any tie-breakers resolved) and the admin can generate the playoff by hand (Group Stage + Playoff only).</summary>
+    public bool CanStartPlayoffs =>
+        Type == TournamentType.GroupStagePlayoff
+        && Status == TournamentStatus.Running
+        && !PlayoffStarted
+        && GroupStageDecided
+        && !NeedsTiebreakers
+        && TiebreakerMatches.All(IsDecided);
+
+    /// <summary>
+    /// Group Stage + Playoff only: seeds and builds the double-elimination playoff from the final
+    /// group standings (each group's top half into the Winner Bracket, bottom half into the Loser
+    /// Bracket). A deliberate admin action, gated on <see cref="CanStartPlayoffs"/>.
+    /// </summary>
+    public void StartPlayoffs()
+    {
+        if (Type != TournamentType.GroupStagePlayoff)
+        {
+            throw new DomainException("Rájátszás csak csoportkör + rájátszás versenyben van.");
+        }
+
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("A rájátszás csak futó versenyben indítható.");
+        }
+
+        if (PlayoffStarted)
+        {
+            throw new DomainException("A rájátszás már elindult.");
+        }
+
+        if (!GroupStageDecided)
+        {
+            throw new DomainException("A rájátszás előtt minden csoportmeccsnek el kell dőlnie.");
+        }
+
+        if (NeedsTiebreakers)
+        {
+            throw new DomainException("A rájátszás előtt döntsd el a holtversenyeket.");
+        }
+
+        if (!TiebreakerMatches.All(IsDecided))
+        {
+            throw new DomainException("A rájátszás előtt minden holtverseny-meccsnek el kell dőlnie.");
+        }
+
+        var capacity = PlayoffCapacity;
+        GroupStagePlayoffBracket.ValidatePlayoffCapacity(_participants.Count, capacity);
+        var (upperSeeds, lowerSeeds, _) = GroupStagePlayoffBracket.SeedPools(BuildSeedOrder(capacity), capacity, PlayoffKind);
+        _matches.AddRange(GroupStagePlayoffBracket.BuildPlayoff(this, upperSeeds, lowerSeeds));
+    }
+
+    /// <summary>
+    /// Swiss group stage only: true once every match of the current round is decided and another round
+    /// is still due. Swiss pairings depend on results, so rounds are created one at a time.
+    /// </summary>
+    public bool CanStartNextSwissRound
+    {
+        get
+        {
+            if (!UsesSwissGroupStage || Status != TournamentStatus.Running)
+            {
+                return false;
+            }
+
+            var paired = SwissRoundsPaired;
+            return paired > 0 && paired < ResolvedSwissRounds && GroupStageMatches.All(IsDecided);
+        }
+    }
+
+    /// <summary>
+    /// Swiss group stage only: pairs and appends the next round from the current standings. A deliberate
+    /// admin action gated on <see cref="CanStartNextSwissRound"/>, mirroring <see cref="StartPlayoffs"/>.
+    /// </summary>
+    public void StartNextSwissRound()
+    {
+        if (!UsesSwissGroupStage)
+        {
+            throw new DomainException("Svájci forduló csak svájci csoportkörben van.");
+        }
+
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("Svájci forduló csak futó versenyben indítható.");
+        }
+
+        if (SwissRoundsPaired >= ResolvedSwissRounds)
+        {
+            throw new DomainException("Minden svájci forduló párosítása kész.");
+        }
+
+        if (!GroupStageMatches.All(IsDecided))
+        {
+            throw new DomainException("A következő forduló párosítása előtt az aktuális forduló minden meccsének el kell dőlnie.");
+        }
+
+        var standings = RoundRobinStandings
+            .Rank(ScopeMatches(null), _participants, RosterById(), RanksGroupsByGamesWon)
+            .Select(row => row.ParticipantId)
+            .ToList();
+
+        _matches.AddRange(SwissBracket.BuildRound(this, SwissRoundsPaired + 1, standings));
+    }
+
+    /// <summary>The group-stage (or Swiss) matches - flat, unrouted, and the input to the standings.</summary>
+    private IEnumerable<Match> GroupStageMatches => _matches.Where(m => m.Segment == BracketSegment.RoundRobin);
+
+    /// <summary>Swiss group stage: how many rounds have actually been paired so far.</summary>
+    private int SwissRoundsPaired => GroupStageMatches.Select(m => m.Round).DefaultIfEmpty(0).Max();
+
+    /// <summary>The roster keyed by id, as the standings ranker needs it for its name-order backstop.</summary>
+    private Dictionary<Guid, Participant> RosterById() => _participants.ToDictionary(p => p.Id);
+
+    /// <summary>Each group's final standings, best to worst.</summary>
+    private List<IReadOnlyList<Guid>> GroupStandings()
+    {
+        var roster = RosterById();
+        var standings = new List<IReadOnlyList<Guid>>(GroupCount);
+        for (var g = 0; g < GroupCount; g++)
+        {
+            var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
+            standings.Add(RoundRobinStandings.Rank(ScopeMatches(g), groupParticipants, roster, RanksGroupsByGamesWon).Select(r => r.ParticipantId).ToList());
+        }
+
+        return standings;
+    }
+
+    /// <summary>
+    /// The full seeding order: every group winner, then every runner-up, and so on. A level whose
+    /// members are competing for fewer slots than there are of them is ordered by the cross-group
+    /// decider they played; everything else keeps its group order.
+    /// </summary>
+    private List<Guid> BuildSeedOrder(int capacity)
+    {
+        // A Swiss pool is one flat standings table - there are no groups to interleave, so its order is
+        // the seeding order and the top `capacity` qualify.
+        if (UsesSwissGroupStage)
+        {
+            return RoundRobinStandings
+                .Rank(ScopeMatches(null), _participants, RosterById(), RanksGroupsByGamesWon)
+                .Select(row => row.ParticipantId)
+                .ToList();
+        }
+
+        var standings = GroupStandings();
+        var levels = GroupStagePlayoffBracket.PlanLevels(CurrentGroupSizes(), capacity, PlayoffKind);
+
+        var order = new List<Guid>(_participants.Count);
+        foreach (var level in levels)
+        {
+            var members = GroupStagePlayoffBracket.LevelMembers(standings, level.Position);
+            order.AddRange(level.Outcome == LevelOutcome.Contested ? OrderByCrossGroupDecider(members) : members);
+        }
+
+        return order;
+    }
+
+    /// <summary>
+    /// Contested levels whose members the cross-group deciders have not separated at the slot they are
+    /// competing for. Only the boundary inside the level matters: members tied above or below it are
+    /// interchangeable, so they are left alone.
+    /// </summary>
+    private List<IReadOnlyList<Guid>> UnresolvedContestedLevels(IReadOnlyList<GroupStagePlayoffBracket.PlacementLevel> levels, int capacity)
+    {
+        var standings = GroupStandings();
+        var unresolved = new List<IReadOnlyList<Guid>>();
+
+        foreach (var level in levels.Where(l => l.Outcome == LevelOutcome.Contested))
+        {
+            var members = GroupStagePlayoffBracket.LevelMembers(standings, level.Position);
+            if (members.Count < 2)
+            {
+                continue;
+            }
+
+            // Cut positions expressed relative to this level's own span.
+            var localCuts = GroupStagePlayoffBracket.SeedCuts(capacity, PlayoffKind)
+                .Where(cut => GroupStagePlayoffBracket.SpansCut(level.Start, level.End, cut))
+                .Select(cut => cut - level.Start)
+                .ToList();
+
+            // The deciders played so far split the level into runs of equal record; a run still spanning
+            // one of those cuts is still contesting that slot.
+            var offset = 0;
+            foreach (var run in RoundRobinStandings.SplitByScore(members, CrossGroupWins(members)))
+            {
+                if (run.Count > 1 && localCuts.Any(cut => GroupStagePlayoffBracket.SpansCut(offset, offset + run.Count - 1, cut)))
+                {
+                    unresolved.Add(run);
+                }
+
+                offset += run.Count;
+            }
+        }
+
+        return unresolved;
+    }
+
+    /// <summary>Orders a contested level by its cross-group tie-breaker record, falling back to name so the order is always total.</summary>
+    private List<Guid> OrderByCrossGroupDecider(List<Guid> members)
+    {
+        var wins = CrossGroupWins(members);
+        var roster = RosterById();
+        return members
+            .OrderByDescending(id => wins[id])
+            .ThenBy(id => roster[id].Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Wins each member has in the cross-group tie-breaker matches played between two members of the set.</summary>
+    private Dictionary<Guid, int> CrossGroupWins(List<Guid> members) =>
+        RoundRobinStandings.WinsAmong(members, _matches.Where(m => m.Segment == BracketSegment.Tiebreaker && m.GroupIndex is null));
+
+    /// <summary>
+    /// Round Robin and Group Stage + Playoff only: generates played Bo1 tie-breaker matches for every
+    /// tie that this tournament's <see cref="TiebreakerPolicy"/> cannot resolve and that changes an
+    /// outcome (the Upper/Lower split per group, or a Round Robin podium place). One-shot: mirrors
+    /// <see cref="StartPlayoffs"/>, gated on <see cref="NeedsTiebreakers"/>.
+    /// </summary>
+    public void StartTiebreakers()
+    {
+        if (Type is not (TournamentType.RoundRobin or TournamentType.GroupStagePlayoff))
+        {
+            throw new DomainException("Holtverseny-döntő csak körmérkőzéses és csoportkör + rájátszás versenyben van.");
+        }
+
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("Holtversenyt csak futó versenyben lehet eldönteni.");
+        }
+
+        if (Type == TournamentType.GroupStagePlayoff && PlayoffStarted)
+        {
+            throw new DomainException("A rájátszás már elindult.");
+        }
+
+        if (!GroupStageDecided)
+        {
+            throw new DomainException("A holtversenyek eldöntése előtt minden körmérkőzésnek el kell dőlnie.");
+        }
+
+        if (!TiebreakerMatches.All(IsDecided))
+        {
+            throw new DomainException("Előbb játsszátok le a meglévő holtverseny-meccseket.");
+        }
+
+        var cohorts = UnresolvedTieCohorts();
+        if (cohorts.Count == 0)
+        {
+            throw new DomainException("Nincs olyan holtverseny, amit el kellene dönteni.");
+        }
+
+        // Snapshot before the loop: cohorts sharing a group in this same wave must all start from the
+        // same offset. Reading live _matches instead would make each cohort see its siblings' matches
+        // - added earlier in this same loop - as a "previous wave" and number itself one round later,
+        // even though they are independent ties resolved simultaneously.
+        var existingTiebreakers = _matches.Where(m => m.Segment == BracketSegment.Tiebreaker).ToList();
+
+        foreach (var (groupIndex, members) in cohorts)
+        {
+            // A previous wave may already occupy rounds 1..n for this scope (a tie-breaker round can
+            // itself end in a cycle), so continue numbering after it rather than colliding with it.
+            var played = existingTiebreakers.Where(m => m.GroupIndex == groupIndex).ToList();
+            var roundOffset = played.Count == 0 ? 0 : played.Max(m => m.Round);
+
+            _matches.AddRange(RoundRobinBracket.Schedule(
+                Id, members, MatchFormat.Bo1, DefaultScoreType, groupIndex, BracketSegment.Tiebreaker, roundOffset));
+        }
+    }
+
+    private IEnumerable<Match> TiebreakerMatches => _matches.Where(m => m.Segment == BracketSegment.Tiebreaker);
+
+    /// <summary>The round-robin and tie-breaker matches for one scope: a single group (Group Stage + Playoff) or the whole field (Round Robin, <paramref name="groupIndex"/> null).</summary>
+    private IEnumerable<Match> ScopeMatches(int? groupIndex) =>
+        _matches.Where(m =>
+            (m.Segment == BracketSegment.RoundRobin || m.Segment == BracketSegment.Tiebreaker)
+            && (groupIndex is null || m.GroupIndex == groupIndex));
+
+    /// <summary>
+    /// Round Robin and Group Stage + Playoff only: whether a standings tie that changes an outcome is
+    /// still unresolved and needs played tie-breaker matches (none have been generated yet).
+    /// </summary>
+    public bool NeedsTiebreakers
+    {
+        get
+        {
+            // A wave that is still being played is not a reason to generate another one.
+            if (Status != TournamentStatus.Running || !GroupStageDecided || !TiebreakerMatches.All(IsDecided))
+            {
+                return false;
+            }
+
+            if (Type == TournamentType.GroupStagePlayoff)
+            {
+                return !PlayoffStarted && UnresolvedTieCohorts().Count > 0;
+            }
+
+            return Type == TournamentType.RoundRobin && UnresolvedTieCohorts().Count > 0;
+        }
+    }
+
+    /// <summary>The tied cohorts (with their group, null for Round Robin) that need played tie-breaker matches under the current policy.</summary>
+    private List<(int? GroupIndex, IReadOnlyList<Guid> Members)> UnresolvedTieCohorts()
+    {
+        var roster = RosterById();
+        var result = new List<(int?, IReadOnlyList<Guid>)>();
+
+        if (UsesSwissGroupStage)
+        {
+            // One flat pool: the only placements worth playing off are the ones that straddle a playoff
+            // cut, which is the same rule the groups use - just over the whole field at once.
+            var cuts = GroupStagePlayoffBracket.SeedCuts(PlayoffCapacity, PlayoffKind);
+            foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(
+                ScopeMatches(null), _participants, roster, TiebreakerPolicy, cuts, RanksGroupsByGamesWon))
+            {
+                result.Add((null, cohort));
+            }
+        }
+        else if (Type == TournamentType.GroupStagePlayoff)
+        {
+            var capacity = PlayoffCapacity;
+            var sizes = CurrentGroupSizes();
+            var levels = GroupStagePlayoffBracket.PlanLevels(sizes, capacity, PlayoffKind);
+
+            // A group placement only needs playing off when finishing one place lower would change the
+            // participant's fate (Winner Bracket, Loser Bracket, eliminated, or into a contested level).
+            for (var g = 0; g < GroupCount; g++)
+            {
+                var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
+                var cuts = GroupStagePlayoffBracket.GroupBoundaryCuts(levels, sizes[g]);
+                foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(ScopeMatches(g), groupParticipants, roster, TiebreakerPolicy, cuts, RanksGroupsByGamesWon))
+                {
+                    result.Add((g, cohort));
+                }
+            }
+
+            // Group placements have to be settled before the cross-group contests can even be identified.
+            if (result.Count == 0)
+            {
+                result.AddRange(UnresolvedContestedLevels(levels, capacity).Select(members => ((int?)null, members)));
+            }
+        }
+        else
+        {
+            // Round Robin ranks the whole field rather than just a podium, so there is no boundary to
+            // be inside of - every tie changes someone's final position.
+            foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(
+                ScopeMatches(null), _participants, roster, TiebreakerPolicy, boundaryCuts: null))
+            {
+                result.Add((null, cohort));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Whether the group stage exists and every one of its matches is decided (single pass over the match list).</summary>
+    private bool GroupStageDecided
+    {
+        get
+        {
+            var any = false;
+            foreach (var match in _matches)
+            {
+                if (match.Segment != BracketSegment.RoundRobin)
+                {
+                    continue;
+                }
+
+                if (!IsDecided(match))
+                {
+                    return false;
+                }
+
+                any = true;
+            }
+
+            // A Swiss pool is only done once every scheduled round has actually been paired - the rounds
+            // played so far being decided just means the next one can be paired.
+            return any && (!UsesSwissGroupStage || SwissRoundsPaired >= ResolvedSwissRounds);
+        }
+    }
+
+    /// <summary>Group Stage + Playoff: whether the playoff bracket has been generated (any elimination-segment match exists).</summary>
+    private bool PlayoffStarted =>
+        _matches.Any(m => m.Segment is BracketSegment.Winner or BracketSegment.Loser or BracketSegment.GrandFinal);
+
+    /// <summary>
+    /// Whether this tournament's elimination matches advance/undo by following routes persisted on the
+    /// match (Double Elimination, and the Group Stage + Playoff playoff) rather than Single
+    /// Elimination's positional round math. Callers check this only after excluding
+    /// <see cref="BracketSegment.RoundRobin"/> matches, which never advance at all.
+    /// </summary>
+    private bool UsesStoredRoutes => Type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
+
+    /// <summary>
+    /// Whether the bracket that decides this tournament converges on a Grand Final - a Double
+    /// Elimination, or a Group Stage + Playoff whose playoff is double elimination. The
+    /// single-elimination shapes finish on their Final instead, and report third place from a real
+    /// Third Place match rather than deriving it from the Loser Bracket Final.
+    /// </summary>
+    private bool DecidedByGrandFinal =>
+        Type == TournamentType.DoubleElimination
+        || (Type == TournamentType.GroupStagePlayoff && PlayoffKind == PlayoffKind.DoubleElimination);
+
+    /// <summary>A flat, unrouted match with no dependents - a Round Robin/group-stage match or a tie-breaker match. It never advances anyone, so its undo turns on <see cref="HasStageDerivedFrom"/> rather than on route slots.</summary>
+    private static bool IsFlatSegment(BracketSegment segment) => segment is BracketSegment.RoundRobin or BracketSegment.Tiebreaker;
+
+    /// <summary>
+    /// Whether a whole stage has already been drawn from a flat match's result. Flat matches route to
+    /// nobody, so nothing points back at them - but the playoff seeding, the next Swiss pairing and each
+    /// tie-breaker wave are all computed from the standings they feed. Undoing one after that would leave
+    /// the derived stage standing on a result that no longer exists: a bracket seeded with a participant
+    /// who no longer qualifies, or a tie-breaker between participants who are no longer tied. Since none
+    /// of those stages can be regenerated (they all refuse to run twice), the undo is refused instead.
+    /// </summary>
+    private bool HasStageDerivedFrom(Match match)
+    {
+        if (PlayoffStarted)
+        {
+            return true;
+        }
+
+        if (match.Segment == BracketSegment.Tiebreaker)
+        {
+            // Seeding is the only thing drawn from a tie-breaker, so the playoff check above is the whole
+            // rule. A *later* tie-breaker wave is also derived from this result, but a wave spans as many
+            // rounds as its cohort needs, so a higher round in the same group is just as likely to be
+            // this match's own wave - the two are indistinguishable without storing which wave a match
+            // belongs to, and a cyclic tie-breaker that then gets undone is not worth a column.
+            return false;
+        }
+
+        // Any tie-breaker at all was drawn from the completed group standings this match belongs to.
+        return TiebreakerMatches.Any() || (UsesSwissGroupStage && match.Round < SwissRoundsPaired);
+    }
+
+    /// <summary>
+    /// Double Elimination only: the Loser Bracket Final's decided loser - there is no separate
+    /// Third Place match (BR-008). Null if undecided, or if this participant count's bye cascade
+    /// collapsed the Loser Bracket Final away entirely (see <see cref="Brackets.DoubleEliminationBracket"/>).
+    /// </summary>
+    public Guid? ThirdPlaceParticipantId
+    {
+        get
+        {
+            // Only a Grand-Final-shaped bracket derives third place from its Loser Bracket Final; every
+            // other shape either has a real Third Place match or no third place at all.
+            if (!DecidedByGrandFinal)
+            {
+                return null;
+            }
+
+            var capacity = Type == TournamentType.GroupStagePlayoff
+                ? PlayoffCapacity
+                : DoubleEliminationBracket.ComputeBracketSize(_participants.Count);
+            var finalRound = DoubleEliminationBracket.LoserRoundCount(capacity);
+            var loserFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Loser && m.Round == finalRound);
+            if (loserFinal?.WinnerId is not { } winnerId)
+            {
+                return null;
+            }
+
+            return winnerId == loserFinal.ParticipantAId ? loserFinal.ParticipantBId : loserFinal.ParticipantAId;
+        }
+    }
+
+    /// <summary>
+    /// True if <paramref name="matchId"/> is currently eligible for <see cref="UndoMatch"/> (BR-022):
+    /// it is the tournament's most recently decided match and nothing it fed into has started yet.
+    /// A finished tournament's result is locked - not even its deciding match can be undone.
+    /// </summary>
+    public bool CanUndo(Guid matchId)
+    {
+        if (Status == TournamentStatus.Finished)
+        {
+            return false;
+        }
+
+        var match = _matches.FirstOrDefault(m => m.Id == matchId);
+        if (match is null || !IsLatestDecided(match))
+        {
+            return false;
+        }
+
+        if (IsFlatSegment(match.Segment))
+        {
+            // No match points at a flat one, but a later stage may have been derived from its result.
+            return !HasStageDerivedFrom(match);
+        }
+
+        if (UsesStoredRoutes)
+        {
+            var (winnerRouteMatch, _, loserRouteMatch, _) = FindUndoDependentsDoubleElimination(match);
+            return !IsBlockedFrom(winnerRouteMatch, loserRouteMatch);
+        }
+
+        var (nextWinnerMatch, _, thirdPlaceMatch) = FindUndoDependents(match);
+        return !IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch);
+    }
+
+    /// <summary>
+    /// Reverts the chronologically latest completed/forfeited match, provided nothing it fed into
+    /// has started yet (BR-022, FR-UNDO-001..004).
+    /// </summary>
+    public void UndoMatch(Guid matchId)
+    {
+        if (Status == TournamentStatus.Finished)
+        {
+            throw new DomainException("Lezárt verseny eredménye nem vonható vissza.");
+        }
+
+        var match = FindMatch(matchId);
+        if (match.Status is not (MatchStatus.Completed or MatchStatus.Forfeit))
+        {
+            throw new DomainException("Csak lezárt vagy feladott meccs vonható vissza.");
+        }
+
+        if (!IsLatestDecided(match))
+        {
+            throw new DomainException("Csak a legutóbb lezárt meccs vonható vissza.");
+        }
+
+        // Round Robin / group-stage / tie-breaker matches feed nothing, so there is no dependent slot
+        // to clear - and a drawn Best-of-2 group match has no winner/loser to read anyway. They can
+        // still have had a whole stage drawn from their standings, which is checked separately.
+        if (IsFlatSegment(match.Segment))
+        {
+            if (HasStageDerivedFrom(match))
+            {
+                throw new DomainException("Ez a meccs nem vonható vissza, mert az eredményéből már egy későbbi szakasz készült.");
+            }
+        }
+        else
+        {
+            var (winnerId, loserId) = WinnerAndLoser(match);
+
+            if (UsesStoredRoutes)
+            {
+                var (winnerRouteMatch, winnerRouteSlotA, loserRouteMatch, loserRouteSlotA) = FindUndoDependentsDoubleElimination(match);
+
+                if (IsBlockedFrom(winnerRouteMatch, loserRouteMatch))
+                {
+                    throw new DomainException("Ez a meccs nem vonható vissza, mert egy rá épülő meccs már elkezdődött.");
+                }
+
+                winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
+                loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
+            }
+            else
+            {
+                var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
+
+                if (IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch))
+                {
+                    throw new DomainException("Ez a meccs nem vonható vissza, mert egy rá épülő meccs már elkezdődött.");
+                }
+
+                nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
+                thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+            }
+        }
+
+        match.Undo();
+    }
+
+    private void Advance(Match match)
+    {
+        if (IsFlatSegment(match.Segment))
+        {
+            // Round Robin / group-stage / tie-breaker matches never feed into another match.
+            return;
+        }
+
+        if (UsesStoredRoutes)
+        {
+            AdvanceDoubleElimination(match);
+            return;
+        }
+
+        if (match.Segment != BracketSegment.Winner)
+        {
+            return;
+        }
+
+        var (winnerId, loserId) = WinnerAndLoser(match);
+        var rounds = TotalRounds();
+
+        var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
+        if (next is not null)
+        {
+            FindWinnerMatch(next.Value.Round, next.Value.IndexInRound).ResolveSlot(next.Value.SlotA, winnerId);
+        }
+
+        if (ThirdPlaceEnabled && match.Round == rounds - 1)
+        {
+            var thirdPlace = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+            thirdPlace?.ResolveSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+        }
+    }
+
+    /// <summary>
+    /// Double Elimination: routes are pre-resolved (through any bye-cascade collapse) once at
+    /// Start() time and stored directly on the match, so advancing just follows them - no round
+    /// math needed, unlike Single Elimination's on-the-fly <see cref="SingleEliminationBracket.NextWinnerSlot"/>.
+    /// </summary>
+    private void AdvanceDoubleElimination(Match match)
+    {
+        var (winnerId, loserId) = WinnerAndLoser(match);
+
+        if (match.WinnerToMatchId is { } winnerToMatchId)
+        {
+            FindMatch(winnerToMatchId).ResolveSlot(match.WinnerToSlotA!.Value, winnerId);
+        }
+
+        if (match.LoserToMatchId is { } loserToMatchId)
+        {
+            FindMatch(loserToMatchId).ResolveSlot(match.LoserToSlotA!.Value, loserId);
+        }
+    }
+
+    /// <summary>Whether the Final (and, if enabled, Third Place) - or the Grand Final, or every match for Round Robin - is decided.</summary>
+    private bool IsReadyToFinish()
+    {
+        // For a Group Stage + Playoff the Grand Final only exists once the playoff has been started.
+        // A single-elimination playoff falls through to the Final (+ Third Place) check below.
+        if (DecidedByGrandFinal)
+        {
+            var grandFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
+            return grandFinal is not null && IsDecided(grandFinal);
+        }
+
+        // The playoff hasn't been built yet, so there is no Final to decide.
+        if (Type == TournamentType.GroupStagePlayoff && !PlayoffStarted)
+        {
+            return false;
+        }
+
+        if (Type == TournamentType.RoundRobin)
+        {
+            return _matches.All(IsDecided) && !NeedsTiebreakers;
+        }
+
+        var rounds = TotalRounds();
+        var final = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Winner && m.Round == rounds && m.IndexInRound == 0);
+        if (final is null || !IsDecided(final))
+        {
+            return false;
+        }
+
+        var thirdPlace = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+        return thirdPlace is null || IsDecided(thirdPlace);
+    }
+
+    /// <summary>
+    /// Rounds in the winner-side elimination tree. A Group Stage + Playoff's tree is sized by the
+    /// playoff cut, not the roster - only the qualifiers ever play in it.
+    /// </summary>
+    private int TotalRounds() => SingleEliminationBracket.RoundCount(
+        Type == TournamentType.GroupStagePlayoff
+            ? PlayoffCapacity
+            : SingleEliminationBracket.ComputeBracketSize(_participants.Count));
+
+    private bool IsLatestDecided(Match match) =>
+        match.CompletionSequence is not null && LatestDecidedMatch() == match;
+
+    /// <summary>The most recently decided match, or null if none has been. Completion sequences are unique, so there is never a tie.</summary>
+    private Match? LatestDecidedMatch()
+    {
+        Match? latest = null;
+        foreach (var match in _matches)
+        {
+            if (match.CompletionSequence is { } sequence && sequence > (latest?.CompletionSequence ?? long.MinValue))
+            {
+                latest = match;
+            }
+        }
+
+        return latest;
+    }
+
+    /// <summary>
+    /// The one match that can be undone right now, or null if none can. Undo always targets the most
+    /// recently decided match, so however many matches a tournament has there is never more than one
+    /// candidate. Callers that need this for a whole bracket should ask once and compare ids rather than
+    /// asking <see cref="CanUndo"/> per match, which re-scans every match to find the latest one each
+    /// time - quadratic over a 496-match round robin, for an answer that can only be yes once.
+    /// </summary>
+    public Guid? UndoableMatchId =>
+        LatestDecidedMatch() is { } latest && CanUndo(latest.Id) ? latest.Id : null;
+
+    /// <summary>The downstream winner-slot and third-place matches, if any, that <paramref name="match"/> feeds into.</summary>
+    private (Match? NextWinnerMatch, bool NextWinnerSlotA, Match? ThirdPlaceMatch) FindUndoDependents(Match match)
+    {
+        var rounds = TotalRounds();
+
+        Match? nextWinnerMatch = null;
+        var nextWinnerSlotA = false;
+        if (match.Segment == BracketSegment.Winner)
+        {
+            var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
+            if (next is not null)
+            {
+                nextWinnerMatch = FindWinnerMatch(next.Value.Round, next.Value.IndexInRound);
+                nextWinnerSlotA = next.Value.SlotA;
+            }
+        }
+
+        Match? thirdPlaceMatch = null;
+        if (ThirdPlaceEnabled && match.Segment == BracketSegment.Winner && match.Round == rounds - 1)
+        {
+            thirdPlaceMatch = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+        }
+
+        return (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch);
+    }
+
+    /// <summary>
+    /// Double Elimination analog of <see cref="FindUndoDependents"/>: both of a match's own
+    /// pre-resolved routes (winner and loser) lead somewhere real, unlike Single Elimination's
+    /// single forward route plus an optional separate Third Place route - so this returns both
+    /// uniformly rather than forcing DE into that shape.
+    /// </summary>
+    private (Match? WinnerRouteMatch, bool WinnerRouteSlotA, Match? LoserRouteMatch, bool LoserRouteSlotA) FindUndoDependentsDoubleElimination(Match match)
+    {
+        var winnerRouteMatch = match.WinnerToMatchId is { } winnerToMatchId ? FindMatch(winnerToMatchId) : null;
+        var loserRouteMatch = match.LoserToMatchId is { } loserToMatchId ? FindMatch(loserToMatchId) : null;
+
+        return (winnerRouteMatch, match.WinnerToSlotA ?? false, loserRouteMatch, match.LoserToSlotA ?? false);
+    }
+
+    private static (Guid WinnerId, Guid LoserId) WinnerAndLoser(Match match) => (match.WinnerId!.Value, match.LoserId!.Value);
+
+    /// <summary>Whether an undo is blocked because either dependent match has already started.</summary>
+    private static bool IsBlockedFrom(Match? a, Match? b) =>
+        a is { Status: not MatchStatus.Pending } || b is { Status: not MatchStatus.Pending };
+
+    private static bool IsDecided(Match match) => match.IsDecided;
+
+    private long NextCompletionSequence() =>
+        _matches.Where(m => m.CompletionSequence.HasValue).Select(m => m.CompletionSequence!.Value).DefaultIfEmpty(0L).Max() + 1;
+
+    private Match FindWinnerMatch(int round, int indexInRound) =>
+        _matches.Single(m => m.Segment == BracketSegment.Winner && m.Round == round && m.IndexInRound == indexInRound);
+
+    private Match FindMatch(Guid matchId) =>
+        _matches.FirstOrDefault(m => m.Id == matchId)
+        ?? throw new DomainException("A meccs nincs ebben a versenyben.");
+
+    private void SetDetails(
+        string name,
+        DateOnly date,
+        string? notes,
+        TournamentType type,
+        MatchFormat defaultMatchFormat,
+        ScoreType defaultScoreType,
+        bool thirdPlaceEnabled,
+        int groupCount,
+        TiebreakerPolicy tiebreakerPolicy,
+        MatchFormat? groupStageMatchFormat,
+        MatchFormat? upperBracketFormat,
+        MatchFormat? lowerBracketFormat,
+        MatchFormat? grandFinalFormat,
+        GroupStageKind groupStageKind,
+        PlayoffKind playoffKind,
+        int playoffSize,
+        int swissRounds)
+    {
+        name = (name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new DomainException("A verseny neve kötelező.");
+        }
+
+        if (name.Length > NameMaxLength)
+        {
+            throw new DomainException($"A verseny neve legfeljebb {NameMaxLength} karakter lehet.");
+        }
+
+        notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        if (notes is { Length: > NotesMaxLength })
+        {
+            throw new DomainException($"A megjegyzés legfeljebb {NotesMaxLength} karakter lehet.");
+        }
+
+        var isGroupStagePlayoff = type == TournamentType.GroupStagePlayoff;
+        var usesSwiss = isGroupStagePlayoff && groupStageKind == GroupStageKind.Swiss;
+        var playoffIsSingleElimination = type == TournamentType.SingleElimination
+            || (isGroupStagePlayoff && playoffKind == PlayoffKind.SingleElimination);
+
+        if (!playoffIsSingleElimination && thirdPlaceEnabled)
+        {
+            throw new DomainException("Bronzmeccs csak egyenes kieséses ágban lehet.");
+        }
+
+        // Every per-segment format falls back to the tournament's single default when not given
+        // explicitly, and collapses back to it entirely for a type that has no such segment - so an
+        // existing Double Elimination or Group Stage + Playoff tournament (or a caller that only ever
+        // set one format) behaves exactly as it did with a single uniform format.
+        var usesBracketFormats = type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
+        var resolvedGroupStageFormat = isGroupStagePlayoff ? groupStageMatchFormat ?? defaultMatchFormat : defaultMatchFormat;
+        var resolvedUpperFormat = usesBracketFormats ? upperBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
+        var resolvedLowerFormat = usesBracketFormats ? lowerBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
+
+        // Every elimination shape ends on one deciding match that may be played longer than the rest -
+        // a Grand Final for the double-elimination shapes, a Final for the single-elimination ones - so
+        // GrandFinalFormat applies to all of them. Only Round Robin, which has no deciding match,
+        // collapses it onto the default.
+        var resolvedGrandFinalFormat = type == TournamentType.RoundRobin
+            ? defaultMatchFormat
+            : grandFinalFormat ?? defaultMatchFormat;
+
+        // A single-elimination playoff has no Loser Bracket, so that format collapses onto the one
+        // bracket format - the same "collapse to the default when the segment doesn't exist" convention
+        // the non-bracket types use above.
+        if (isGroupStagePlayoff && playoffKind == PlayoffKind.SingleElimination)
+        {
+            resolvedLowerFormat = resolvedUpperFormat;
+        }
+
+        // Only the Group Stage format may allow draws (Best of 2) - every bracket match needs a winner.
+        if (defaultMatchFormat.AllowsDraw() || resolvedUpperFormat.AllowsDraw()
+            || resolvedLowerFormat.AllowsDraw() || resolvedGrandFinalFormat.AllowsDraw())
+        {
+            throw new DomainException("Döntetlen (Bo2) csak a csoportkörben lehet.");
+        }
+
+        // A Swiss pool ranks on match wins, and a bye - which is a win with no games played - would sit
+        // below every real win under Best-of-2's games-won ranking. Draws have no place in a format
+        // whose whole job is to separate the field, so Best of 2 is a round-robin-groups-only option.
+        if (usesSwiss && resolvedGroupStageFormat.AllowsDraw())
+        {
+            throw new DomainException("Svájci csoportkörben nem lehet Bo2: válassz döntős formátumot.");
+        }
+
+        if (isGroupStagePlayoff && !usesSwiss && groupCount < 2)
+        {
+            throw new DomainException("Körmérkőzéses csoportkörhöz legalább 2 csoport kell.");
+        }
+
+        // 0 is "the largest capacity the roster fills", resolved at start time against the real roster.
+        if (isGroupStagePlayoff && playoffSize > 0)
+        {
+            GroupStagePlayoffBracket.ValidateSupportedSize(playoffSize);
+        }
+
+        if (usesSwiss && swissRounds is < 0 or > MaxSwissRounds)
+        {
+            throw new DomainException($"A svájci csoportkör 1 és {MaxSwissRounds} forduló között lehet.");
+        }
+
+        Name = name;
+        Date = date;
+        Notes = notes;
+        Type = type;
+        DefaultMatchFormat = defaultMatchFormat;
+        DefaultScoreType = defaultScoreType;
+        ThirdPlaceEnabled = playoffIsSingleElimination && thirdPlaceEnabled;
+        GroupCount = isGroupStagePlayoff && !usesSwiss ? groupCount : 0;
+        TiebreakerPolicy = tiebreakerPolicy;
+        GroupStageMatchFormat = resolvedGroupStageFormat;
+        UpperBracketFormat = resolvedUpperFormat;
+        LowerBracketFormat = resolvedLowerFormat;
+        GrandFinalFormat = resolvedGrandFinalFormat;
+        GroupStageKind = isGroupStagePlayoff ? groupStageKind : GroupStageKind.RoundRobin;
+        PlayoffKind = isGroupStagePlayoff ? playoffKind : PlayoffKind.DoubleElimination;
+        PlayoffSize = isGroupStagePlayoff ? playoffSize : 0;
+        SwissRounds = usesSwiss ? swissRounds : 0;
+    }
+
+    private void EnsurePlanned(string action)
+    {
+        if (Status != TournamentStatus.Planned)
+        {
+            throw new DomainException($"A verseny csak tervezett állapotban {action}.");
+        }
+    }
+
+    private Participant FindParticipant(Guid participantId) =>
+        _participants.FirstOrDefault(p => p.Id == participantId)
+        ?? throw new DomainException("A résztvevő nincs ebben a versenyben.");
+
+    private void EnsureUniqueName(string name, Guid? excludeId)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new DomainException("A résztvevő neve kötelező.");
+        }
+
+        if (_participants.Any(p => p.Id != excludeId && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw DuplicateName(name);
+        }
+    }
+
+    // Shared by the two roster-mutation paths - one participant at a time, and ReplaceRoster - so the
+    // wording of a rule can't drift between them.
+    private static DomainException DuplicateName(string name) =>
+        new($"Már van „{name}” nevű résztvevő ebben a versenyben.");
+
+    private static DomainException TooManyParticipants() =>
+        new($"Egy versenyben legfeljebb {MaxParticipants} résztvevő lehet.");
+
+    private void ResetSeeding()
+    {
+        foreach (var participant in _participants)
+        {
+            participant.ClearSeed();
+        }
+    }
+
+    private static string GenerateToken() => Guid.NewGuid().ToString("N");
+}

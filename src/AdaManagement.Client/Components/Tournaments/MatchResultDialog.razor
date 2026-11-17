@@ -1,0 +1,252 @@
+@inject ApiClient Api
+@inject IDialogService Dialogs
+
+@* Egy meccs eredményének rögzítése (az Adaminator MatchResultDialog-ja). A játszmák sorban töltődnek: egy korábbi
+   játszma módosítása eldobja a későbbieket. A formátum és a számolás módja a verseny beállításaiból jön, itt nem
+   változik. Eldőlt meccsnél csak az eredmény látszik, és ha ez az utolsó eldőlt meccs, visszavonható. *@
+<MudDialog>
+    <TitleContent>
+        <div class="tr-result-title">
+            <ParticipantLabel Name="@Match.ParticipantA?.Name" Emoji="@Match.ParticipantA?.Emoji" />
+            <span class="tr-vs">–</span>
+            <ParticipantLabel Name="@Match.ParticipantB?.Name" Emoji="@Match.ParticipantB?.Emoji" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3" ShowCloseIcon="true" CloseIconClicked="() => _error = null">@_error</MudAlert>
+        }
+        @if (Decided)
+        {
+            <div class="tr-result">
+                <div class="tr-hint">@(Match.Status == MatchStatus.Forfeit ? "Feladással dőlt el." : "Lezárva.")</div>
+                <div class="tr-result-agg">@Match.AggregateScoreA – @Match.AggregateScoreB</div>
+                <div>@(Match.WinnerId is null ? "Döntetlen" : $"Győztes: {WinnerName}")</div>
+                @if (Match.ScoreType == ScoreType.Points && Match.Entries.Count > 0)
+                {
+                    <div class="tr-form-section mt-3">Pontok játszmánként</div>
+                    @foreach (var e in Match.Entries)
+                    {
+                        <div class="tr-game-line"><span class="tr-game-no">@e.SequenceNumber. játszma</span> @e.ScoreA – @e.ScoreB</div>
+                    }
+                }
+            </div>
+        }
+        else
+        {
+            <div class="tr-hint">@Match.MatchFormat.Label() · @Match.ScoreType.Label()</div>
+            <div class="tr-games">
+                @for (var i = 0; i < MaxGames; i++)
+                {
+                    var index = i;
+                    var slot = SlotAt(i);
+                    var enabled = i < Progress.EnabledCount;
+                    <div class="@($"tr-game{(enabled ? "" : " off")}")">
+                        <span class="tr-game-no">@(i + 1).<span class="tr-game-word"> játszma</span></span>
+                        @if (Match.ScoreType == ScoreType.Points)
+                        {
+                            <MudNumericField T="int?" Value="slot.ScoreA" ValueChanged="v => SetScore(index, v, true)" Label="@NameA"
+                                             Disabled="!enabled" Min="0" HideSpinButtons="true" Immediate="true" Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" Class="tr-game-score" OnBlur="() => FillBlank(index)" />
+                            <MudNumericField T="int?" Value="slot.ScoreB" ValueChanged="v => SetScore(index, v, false)" Label="@NameB"
+                                             Disabled="!enabled" Min="0" HideSpinButtons="true" Immediate="true" Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" Class="tr-game-score" OnBlur="() => FillBlank(index)" />
+                        }
+                        else
+                        {
+                            <div class="tr-game-pick">
+                                <MudButton Size="Size.Small" Disabled="!enabled" Variant="@(slot.AWon == true ? Variant.Filled : Variant.Outlined)"
+                                           Color="@(slot.AWon == true ? Color.Success : Color.Default)" OnClick="() => SetWinner(index, true)">
+                                    <span class="tr-trunc">@NameA nyert</span>
+                                </MudButton>
+                                <MudButton Size="Size.Small" Disabled="!enabled" Variant="@(slot.AWon == false ? Variant.Filled : Variant.Outlined)"
+                                           Color="@(slot.AWon == false ? Color.Success : Color.Default)" OnClick="() => SetWinner(index, false)">
+                                    <span class="tr-trunc">@NameB nyert</span>
+                                </MudButton>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="tr-hint mt-2">
+                Állás: <b>@Progress.WinsA – @Progress.WinsB</b>
+                @(Match.MatchFormat.AllowsDraw()
+                    ? $" (mind a {MaxGames} játszma lemegy, {MaxGames / 2}–{MaxGames / 2} döntetlen)"
+                    : $" ({Match.MatchFormat.RequiredWins()} nyert játszma kell a győzelemhez)")
+            </div>
+            <div class="tr-forfeit">
+                <MudButton Size="Size.Small" Color="Color.Warning" Disabled="_busy" OnClick="() => Forfeit(Match.ParticipantA!)">
+                    <span class="tr-trunc">Feladás: @NameA nyer</span>
+                </MudButton>
+                <MudButton Size="Size.Small" Color="Color.Warning" Disabled="_busy" OnClick="() => Forfeit(Match.ParticipantB!)">
+                    <span class="tr-trunc">Feladás: @NameB nyer</span>
+                </MudButton>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (Decided)
+        {
+            @if (Match.CanUndo)
+            {
+                <MudButton Color="Color.Error" Disabled="_busy" OnClick="Undo">Visszavonás</MudButton>
+            }
+            <MudButton OnClick="Close">Bezárás</MudButton>
+        }
+        else
+        {
+            <MudButton Disabled="_busy" OnClick="Close">Mégse</MudButton>
+            <MudButton Disabled="@(_busy || !_dirty)" OnClick="Save">Mentés</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || !Progress.CanComplete)" OnClick="Complete">Lezárás</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid TournamentId { get; set; }
+    [Parameter, EditorRequired] public BracketMatchDto Match { get; set; } = default!;
+
+    /// <summary>Egy játszma szerkesztés közben; az AWon null, amíg nincs eldöntve.</summary>
+    private sealed record Slot(int? ScoreA, int? ScoreB, bool? AWon);
+
+    private sealed record GameProgress(int Filled, int WinsA, int WinsB, bool CanComplete, int EnabledCount);
+
+    /// <summary>Csak a kitöltött eleje tárolódik; a többi játszma üres.</summary>
+    private List<Slot> _entries = [];
+    private bool _dirty, _busy;
+    private string? _error;
+
+    /// <summary>A szerver legutóbbi válasza: ha van, a szülő ezzel frissíti az ágat bezáráskor.</summary>
+    private BracketDto? _latest;
+
+    private bool Decided => Match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
+    private int MaxGames => Match.MatchFormat.MaxGames();
+    private string NameA => Display(Match.ParticipantA);
+    private string NameB => Display(Match.ParticipantB);
+    private string WinnerName => Match.WinnerId == Match.ParticipantA?.ParticipantId ? NameA : NameB;
+
+    private static string Display(BracketSlotDto? s) => s is null ? "?" : s.Emoji is null ? s.Name : $"{s.Emoji} {s.Name}";
+
+    /// <summary>Az üres játszma: pontos számolásnál 0–0 (döntetlen, így nem számít kitöltöttnek), egyébként üres.</summary>
+    private Slot Blank => Match.ScoreType == ScoreType.Points ? new Slot(0, 0, null) : new Slot(null, null, null);
+
+    private Slot SlotAt(int i) => i < _entries.Count ? _entries[i] : Blank;
+
+    private bool IsFilled(Slot s) => Match.ScoreType == ScoreType.Points
+        ? s.ScoreA is not null && s.ScoreB is not null && s.ScoreA != s.ScoreB
+        : s.AWon is not null;
+
+    private GameProgress Progress
+    {
+        get
+        {
+            var filled = 0;
+            while (filled < _entries.Count && IsFilled(_entries[filled])) filled++;
+            var winsA = _entries.Take(filled).Count(e => e.AWon == true);
+            var winsB = filled - winsA;
+            var required = Match.MatchFormat.RequiredWins();
+            var drawCapable = Match.MatchFormat.AllowsDraw();
+            var decisive = winsA >= required || winsB >= required;
+            var canComplete = drawCapable ? filled == MaxGames : decisive;
+            var enabled = drawCapable ? MaxGames : decisive ? filled : Math.Min(filled + 1, MaxGames);
+            return new GameProgress(filled, winsA, winsB, canComplete, enabled);
+        }
+    }
+
+    protected override void OnInitialized() =>
+        _entries = Match.Entries.OrderBy(e => e.SequenceNumber).Select(e => new Slot(e.ScoreA, e.ScoreB, e.ParticipantAWon)).ToList();
+
+    /// <summary>Megnyitja az ablakot; a változás utáni ágat adja vissza, vagy null-t, ha semmi nem változott.</summary>
+    public static async Task<BracketDto?> ShowAsync(IDialogService dialogs, Guid tournamentId, BracketMatchDto match)
+    {
+        var parameters = new DialogParameters<MatchResultDialog> { { x => x.TournamentId, tournamentId }, { x => x.Match, match } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false, CloseButton = false };
+        var dialog = await dialogs.ShowAsync<MatchResultDialog>("Eredmény", parameters, options);
+        return await dialog.Result is { Canceled: false, Data: BracketDto bracket } ? bracket : null;
+    }
+
+    /// <summary>A játszma módosítása eldobja az utána következőket: azok előzménye megváltozott.</summary>
+    private void Update(int index, Slot slot)
+    {
+        _entries = [.. _entries.Take(index), slot];
+        _dirty = true;
+    }
+
+    private void SetWinner(int index, bool aWon) => Update(index, SlotAt(index) with { AWon = aWon });
+
+    private void SetScore(int index, int? value, bool isA)
+    {
+        var s = SlotAt(index);
+        var a = isA ? value : s.ScoreA;
+        var b = isA ? s.ScoreB : value;
+        // A beírt pontokból adódik a győztes; döntetlen pontszám nem érvényes eredmény.
+        var aWon = a is null || b is null ? s.AWon : a == b ? (bool?)null : a > b;
+        Update(index, new Slot(a, b, aWon));
+    }
+
+    /// <summary>A kiürített mező elhagyáskor visszaáll 0-ra, hogy ne maradjon üresen.</summary>
+    private void FillBlank(int index)
+    {
+        if (index >= _entries.Count) return;
+        var s = _entries[index];
+        if (s.ScoreA is null || s.ScoreB is null)
+            _entries[index] = s with { ScoreA = s.ScoreA ?? 0, ScoreB = s.ScoreB ?? 0, AWon = s.ScoreA is null || s.ScoreB is null ? null : s.AWon };
+    }
+
+    private MatchScoreRequest Payload() => new(Match.MatchFormat, Match.ScoreType,
+        _entries.Take(Progress.Filled).Select(e => new ScoreEntryInputDto(e.ScoreA, e.ScoreB, e.AWon ?? false)).ToList());
+
+    private string MatchUrl(string action) => $"api/tournaments/{TournamentId}/matches/{Match.Id}/{action}";
+
+    private async Task Save()
+    {
+        if (await Run(() => Api.PutAsync<BracketDto>(MatchUrl("result"), Payload()))) _dirty = false;
+    }
+
+    private async Task Complete()
+    {
+        if (await Run(() => Api.PostAsync<BracketDto>(MatchUrl("complete"), Payload()))) MudDialog.Close(DialogResult.Ok(_latest));
+    }
+
+    private async Task Forfeit(BracketSlotDto winner)
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Feladás", $"A meccs feladással zárul, győztes: {Display(winner)}. Utána eredmény már nem írható be. Mehet?",
+                yesText: "Feladás", cancelText: "Mégse") != true) return;
+        if (await Run(() => Api.PostAsync<BracketDto>(MatchUrl("forfeit"), new ForfeitMatchRequest(winner.ParticipantId))))
+            MudDialog.Close(DialogResult.Ok(_latest));
+    }
+
+    private async Task Undo()
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Visszavonás", "A győztes kikerül a következő meccsből, ez a meccs pedig visszaáll a mentett állására. Mehet?",
+                yesText: "Visszavonás", cancelText: "Mégse") != true) return;
+        if (await Run(() => Api.PostAsync<BracketDto>(MatchUrl("undo")))) MudDialog.Close(DialogResult.Ok(_latest));
+    }
+
+    private async Task Close()
+    {
+        if (_dirty && await Dialogs.ShowMessageBoxAsync("Mentetlen eredmény", "Elveted a meccs mentetlen változásait?",
+                yesText: "Elvetés", cancelText: "Mégse") != true) return;
+        if (_latest is null) MudDialog.Cancel();
+        else MudDialog.Close(DialogResult.Ok(_latest));
+    }
+
+    private async Task<bool> Run(Func<Task<BracketDto>> call)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _latest = await call();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            return false;
+        }
+        finally { _busy = false; }
+    }
+}

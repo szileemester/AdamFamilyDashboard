@@ -1,0 +1,257 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+
+@* Verseny létrehozása vagy szerkesztése (csak tervezett állapotban). Mindig csak a választott formához tartozó
+   mezők látszanak (TournamentShape); a rejtett mezők mentéskor a használt formátumra zárulnak, így elavult érték
+   sosem megy el. *@
+<MudDialog>
+    <DialogContent>
+        <div class="tr-form">
+            <div class="tr-form-section">Alapok</div>
+            <div class="tr-form-grid">
+                <MudTextField @bind-Value="_name" Label="Név*" MaxLength="TournamentLimits.NameMaxLength" Immediate="true"
+                              AutoFocus="@(Tournament is null)" Counter="TournamentLimits.NameMaxLength" />
+                <MudDatePicker @bind-Date="_date" Label="Dátum" DateFormat="yyyy.MM.dd" Editable="true" />
+                <MudSelect T="TournamentType" Value="_type" ValueChanged="TypeChanged" Label="Versenytípus">
+                    @foreach (var t in Enum.GetValues<TournamentType>())
+                    {
+                        <MudSelectItem Value="t">@t.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="ScoreType" @bind-Value="_scoreType" Label="Eredmény számolása"
+                           HelperText="Játszmák: ki hány játszmát nyert. Pontok: játszmánként pontszám is.">
+                    @foreach (var s in Enum.GetValues<ScoreType>())
+                    {
+                        <MudSelectItem Value="s">@s.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            @if (Shape.IsGroupStagePlayoff)
+            {
+                <div class="tr-form-section">Felépítés</div>
+                <div class="tr-form-grid">
+                    <MudSelect T="GroupStageKind" Value="_groupStageKind" ValueChanged="GroupStageKindChanged" Label="Csoportkör"
+                               HelperText="Hogyan szűkül a mezőny a rájátszás előtt.">
+                        @foreach (var k in Enum.GetValues<GroupStageKind>())
+                        {
+                            <MudSelectItem Value="k">@k.Label()</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="PlayoffKind" Value="_playoffKind" ValueChanged="PlayoffKindChanged" Label="Rájátszás"
+                               HelperText="Ilyen ágban játszanak a továbbjutók.">
+                        @foreach (var k in Enum.GetValues<PlayoffKind>())
+                        {
+                            <MudSelectItem Value="k">@k.Label()</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (Shape.UsesRoundRobinGroups)
+                    {
+                        <MudNumericField @bind-Value="_groupCount" Label="Csoportok száma" Min="2" Max="TournamentLimits.MaxGroups"
+                                         HelperText="A résztvevők ennyi csoportba kerülnek sorsolással; a létszámok eggyel eltérhetnek." />
+                    }
+                    @if (Shape.UsesSwissPool)
+                    {
+                        <MudNumericField @bind-Value="_swissRounds" Label="Svájci fordulók" Min="0" Max="TournamentLimits.MaxSwissRounds"
+                                         HelperText="0 = annyi forduló, hogy egy veretlen maradjon. Minden fordulót az addigi tabella alapján párosít." />
+                    }
+                    <MudSelect T="int" @bind-Value="_playoffSize" Label="Rájátszás mérete"
+                               HelperText="Hányan jutnak tovább. Automatikus: a legnagyobb, amit a létszám kitölt.">
+                        @foreach (var size in PlayoffSizes)
+                        {
+                            <MudSelectItem Value="size">@(size == 0 ? "Automatikus" : $"{size} fő")</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+            }
+
+            <div class="tr-form-section">Meccsformátum</div>
+            <div class="tr-form-grid">
+                @if (Shape.ShowsSingleFormat)
+                {
+                    @FormatPicker("Meccsformátum", _defaultFormat, v => _defaultFormat = v, Decisive, null)
+                }
+                @if (Shape.IsGroupStagePlayoff)
+                {
+                    @FormatPicker("Csoportmeccsek", _groupFormat, v => _groupFormat = v, Shape.UsesSwissPool ? Decisive : AllFormats,
+                        Shape.UsesSwissPool ? "Svájci rendszerben a győzelmek számítanak, ezért döntős formátum kell."
+                                            : "Bo2-nél mindkét játszmát lejátsszák (1–1 döntetlen), a csoportban a nyert játszmák rangsorolnak.")
+                }
+                @if (Shape.UsesBracketFormats)
+                {
+                    @FormatPicker(Shape.ShowsAllBracketFormats ? "Győztes ág" : "Rájátszás meccsei", _upperFormat, v => _upperFormat = v, Decisive, null)
+                }
+                @if (Shape.ShowsAllBracketFormats)
+                {
+                    @FormatPicker("Vesztes ág", _lowerFormat, v => _lowerFormat = v, Decisive, null)
+                }
+                @if (!Shape.IsRoundRobin)
+                {
+                    @FormatPicker(Shape.ShowsAllBracketFormats ? "Nagydöntő" : "Döntő", _grandFinalFormat, v => _grandFinalFormat = v, Decisive, null)
+                }
+            </div>
+
+            @if (Shape.ShowsRules)
+            {
+                <div class="tr-form-section">Szabályok</div>
+                <div class="tr-form-grid">
+                    @if (Shape.PlayoffIsSingleElimination)
+                    {
+                        <MudCheckBox @bind-Value="_thirdPlace" Label="Bronzmeccs (3. helyért)" Color="Color.Primary" />
+                    }
+                    @if (Shape.ShowsTiebreakerPolicy)
+                    {
+                        <MudSelect T="TiebreakerPolicy" @bind-Value="_tiebreaker" Label="Holtverseny"
+                                   HelperText="Mi dönt, ha az egyenlőség számít (továbbjutás, ág, dobogó).">
+                            @foreach (var p in Enum.GetValues<TiebreakerPolicy>())
+                            {
+                                <MudSelectItem Value="p">@p.Label()</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                </div>
+            }
+
+            <MudTextField @bind-Value="_notes" Label="Megjegyzés" Lines="3" Sizing="InputSizing.Auto" MaxLines="8"
+                          MaxLength="TournamentLimits.NotesMaxLength" Class="mt-2" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Mégse</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="!CanSave">
+            @(Tournament is null ? "Létrehozás" : "Mentés")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Szerkesztett verseny; null, ha újat hozunk létre.</summary>
+    [Parameter] public TournamentDto? Tournament { get; set; }
+
+    private static readonly MatchFormat[] Decisive = [MatchFormat.Bo1, MatchFormat.Bo3, MatchFormat.Bo5, MatchFormat.Bo7];
+    private static readonly MatchFormat[] AllFormats = [MatchFormat.Bo1, MatchFormat.Bo2, MatchFormat.Bo3, MatchFormat.Bo5, MatchFormat.Bo7];
+    private static readonly int[] PlayoffSizes = [0, 4, 8, 16, 32];
+
+    private string? _name, _notes;
+    private DateTime? _date = Format.Now.Date;
+    private TournamentType _type = TournamentType.SingleElimination;
+    private ScoreType _scoreType = ScoreType.Games;
+    private GroupStageKind _groupStageKind = GroupStageKind.RoundRobin;
+    private PlayoffKind _playoffKind = PlayoffKind.DoubleElimination;
+    private int _groupCount = 2, _playoffSize, _swissRounds;
+    private bool _thirdPlace;
+    private TiebreakerPolicy _tiebreaker = TiebreakerPolicy.ComputedThenMatch;
+    private MatchFormat _defaultFormat = MatchFormat.Bo3, _groupFormat = MatchFormat.Bo3,
+        _upperFormat = MatchFormat.Bo3, _lowerFormat = MatchFormat.Bo3, _grandFinalFormat = MatchFormat.Bo3;
+    private bool _busy;
+
+    private TournamentShape Shape => TournamentShape.For(_type, _groupStageKind, _playoffKind);
+
+    private bool CanSave => !_busy && !string.IsNullOrWhiteSpace(_name) && _date is not null
+                            && (!Shape.UsesRoundRobinGroups || _groupCount is >= 2 and <= TournamentLimits.MaxGroups)
+                            && (!Shape.UsesSwissPool || _swissRounds is >= 0 and <= TournamentLimits.MaxSwissRounds);
+
+    /// <summary>Megnyitja az ablakot; a mentett (új vagy módosított) versenyt adja vissza, Mégse esetén null-t.</summary>
+    public static async Task<TournamentDto?> ShowAsync(IDialogService dialogs, TournamentDto? tournament)
+    {
+        var parameters = new DialogParameters<TournamentFormDialog> { { x => x.Tournament, tournament } };
+        var dialog = await dialogs.ShowAsync<TournamentFormDialog>(tournament is null ? "Új verseny" : "Verseny szerkesztése", parameters);
+        return await dialog.Result is { Canceled: false, Data: TournamentDto saved } ? saved : null;
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Tournament is not { } t) return;
+        _name = t.Name;
+        _notes = t.Notes;
+        _date = Format.ToDateTime(t.Date);
+        _type = t.Type;
+        _scoreType = t.DefaultScoreType;
+        _groupStageKind = t.GroupStageKind;
+        _playoffKind = t.PlayoffKind;
+        _groupCount = t.GroupCount > 0 ? t.GroupCount : 2;
+        _playoffSize = t.PlayoffSize;
+        _swissRounds = t.SwissRounds;
+        _thirdPlace = t.ThirdPlaceEnabled;
+        _tiebreaker = t.TiebreakerPolicy;
+        // Ezek a mezők mindig döntős formátumúak; ha valahogy Bo2 állna bennük, Bo3 lesz belőle.
+        _defaultFormat = ToDecisive(t.DefaultMatchFormat);
+        _groupFormat = t.GroupStageMatchFormat;
+        _upperFormat = ToDecisive(t.UpperBracketFormat);
+        _lowerFormat = ToDecisive(t.LowerBracketFormat);
+        _grandFinalFormat = ToDecisive(t.GrandFinalFormat);
+
+        static MatchFormat ToDecisive(MatchFormat f) => f.AllowsDraw() ? MatchFormat.Bo3 : f;
+    }
+
+    private void TypeChanged(TournamentType type)
+    {
+        _type = type;
+        AfterShapeChange();
+    }
+
+    private void GroupStageKindChanged(GroupStageKind kind)
+    {
+        _groupStageKind = kind;
+        AfterShapeChange();
+    }
+
+    private void PlayoffKindChanged(PlayoffKind kind)
+    {
+        _playoffKind = kind;
+        AfterShapeChange();
+    }
+
+    /// <summary>Bronzmeccs csak egyenes kieséses ágban van; svájci mezőnyben nem lehet Bo2.</summary>
+    private void AfterShapeChange()
+    {
+        if (!Shape.PlayoffIsSingleElimination) _thirdPlace = false;
+        if (Shape.UsesSwissPool && _groupFormat.AllowsDraw()) _groupFormat = MatchFormat.Bo3;
+    }
+
+    private RenderFragment FormatPicker(string label, MatchFormat value, Action<MatchFormat> set, MatchFormat[] options, string? hint) => __builder =>
+    {
+        <MudSelect T="MatchFormat" Value="value" ValueChanged="v => set(v)" Label="@label" HelperText="@hint">
+            @foreach (var f in options)
+            {
+                <MudSelectItem Value="f">@f.Label()</MudSelectItem>
+            }
+        </MudSelect>
+    };
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            var s = Shape;
+            // A formában nem szereplő szakaszok a használt formátumra zárulnak (mint az Adaminator űrlapjában).
+            var playoffFormat = s.UsesBracketFormats ? _upperFormat : _defaultFormat;
+            var name = _name!.Trim();
+            var date = Format.ToDateOnly(_date)!.Value;
+            var notes = string.IsNullOrWhiteSpace(_notes) ? null : _notes.Trim();
+            var thirdPlace = s.PlayoffIsSingleElimination && _thirdPlace;
+            var groupCount = s.UsesRoundRobinGroups ? _groupCount : 0;
+            var gsk = s.IsGroupStagePlayoff ? _groupStageKind : GroupStageKind.RoundRobin;
+            var pk = s.IsGroupStagePlayoff ? _playoffKind : PlayoffKind.DoubleElimination;
+            var playoffSize = s.IsGroupStagePlayoff ? _playoffSize : 0;
+            var swissRounds = s.UsesSwissPool ? _swissRounds : 0;
+            var groupFormat = s.IsGroupStagePlayoff ? _groupFormat : _defaultFormat;
+            var lower = s.ShowsAllBracketFormats ? _lowerFormat : playoffFormat;
+            var grandFinal = s.IsRoundRobin ? _defaultFormat : _grandFinalFormat;
+
+            TournamentDto saved = Tournament is null
+                ? await Api.PostAsync<TournamentDto>("api/tournaments", new CreateTournamentRequest(
+                    name, date, notes, _type, _defaultFormat, thirdPlace, _scoreType, groupCount, _tiebreaker,
+                    groupFormat, playoffFormat, lower, grandFinal, gsk, pk, playoffSize, swissRounds))
+                : await Api.PutAsync<TournamentDto>($"api/tournaments/{Tournament.Id}", new UpdateTournamentRequest(
+                    name, date, notes, _type, _defaultFormat, thirdPlace, _scoreType, groupCount, _tiebreaker,
+                    groupFormat, playoffFormat, lower, grandFinal, gsk, pk, playoffSize, swissRounds));
+            MudDialog.Close(DialogResult.Ok(saved));
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

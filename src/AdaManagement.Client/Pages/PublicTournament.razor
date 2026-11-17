@@ -1,0 +1,102 @@
+@page "/nezo/{Token}"
+@inject ApiClient Api
+
+@* Nyilvános, csak olvasható nézői oldal a verseny titkos tokenjével; bejelentkezés nem kell (az /api/public végpont
+   névtelen). Nincs időzített frissítés: az állás oldalbetöltéskor vagy a Frissítés gombra töltődik be, így a nézők
+   nem tartják ébren az adatbázist. *@
+<PageTitle>@(_tournament?.Name ?? "Verseny") – Adam's family dashboard</PageTitle>
+
+@if (_tournament is not { } t)
+{
+    @if (_notFound)
+    {
+        <div class="sub-empty mt-6">Ez a verseny nem található. Lehet, hogy a link elírt, vagy a versenyt törölték.</div>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+}
+else
+{
+    <section class="hero sub-hero">
+        <div class="hero-content">
+            <div class="hero-kicker">@t.Type.Label() · nézői oldal</div>
+            <div class="hero-head">
+                <h1 class="hero-title tr-title">@t.Name</h1>
+                <div class="hero-actions">
+                    <button type="button" class="hero-btn" @onclick="LoadAsync" disabled="@_loading">
+                        <MudIcon Icon="@Icons.Material.Filled.Refresh" /> Frissítés
+                    </button>
+                </div>
+            </div>
+            <div class="hero-meta">
+                <TournamentStatusChip Status="t.Status" />
+                <span class="hero-stat"><b>@Format.Date(t.Date)</b></span>
+                <span class="hero-stat"><b>@t.Participants.Count</b> résztvevő</span>
+                @if (_loadedAt is { } at)
+                {
+                    <span class="hero-stat">frissítve @at.ToString("HH:mm")</span>
+                }
+            </div>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(t.Notes))
+    {
+        <section class="tr-panel mb-4">
+            <div class="tr-notes mt-0">@t.Notes</div>
+        </section>
+    }
+
+    @if (t.Bracket is { } b)
+    {
+        <section class="tr-panel tr-bracket-panel">
+            <BracketView Bracket="b" />
+        </section>
+    }
+    else
+    {
+        <section class="tr-panel">
+            <div class="tr-panel-head"><h2 class="tr-panel-title">Résztvevők</h2></div>
+            <p class="tr-hint">A verseny még nem kezdődött el. Az ág az indításkor jelenik meg.</p>
+            @if (t.Participants.Count == 0)
+            {
+                <div class="tr-hint">Még nincs résztvevő.</div>
+            }
+            else
+            {
+                <ul class="tr-public-roster">
+                    @foreach (var p in t.Participants)
+                    {
+                        <li @key="p.Id"><ParticipantLabel Name="@p.Name" Emoji="@p.Emoji" /></li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = "";
+
+    private PublicTournamentDto? _tournament;
+    private bool _notFound, _loading;
+    private DateTime? _loadedAt;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _tournament = await Api.GetAsync<PublicTournamentDto>($"api/public/tournaments/{Uri.EscapeDataString(Token)}");
+            _loadedAt = DateTime.Now;
+            _notFound = false;
+        }
+        catch (ApiException ex) when (ex.StatusCode == 404) { _notFound = true; }
+        catch { _notFound = _tournament is null; }
+        finally { _loading = false; }
+    }
+}

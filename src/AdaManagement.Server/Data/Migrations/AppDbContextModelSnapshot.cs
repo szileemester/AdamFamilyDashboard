@@ -313,6 +313,269 @@ namespace AdaManagement.Server.Data.Migrations
                     b.ToTable("Tradespeople");
                 });
 
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Match", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long?>("CompletionSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("GroupIndex")
+                        .HasColumnType("int");
+
+                    b.Property<int>("IndexInRound")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("LoserToMatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("LoserToSlotA")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MatchFormat")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<Guid?>("ParticipantAId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ParticipantBId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Round")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ScoreType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Segment")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TournamentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("WinnerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("WinnerToMatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("WinnerToSlotA")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TournamentId");
+
+                    b.ToTable("matches", "tournament");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Participant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Emoji")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int?>("GroupIndex")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("HasBye")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Seed")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TournamentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TournamentId", "Name");
+
+                    b.ToTable("participants", "tournament");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.ScoreEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("MatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ParticipantAWon")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ScoreA")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ScoreB")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SequenceNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MatchId", "SequenceNumber")
+                        .IsUnique();
+
+                    b.ToTable("score_entries", "tournament");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Tournament", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("DefaultMatchFormat")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("DefaultScoreType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("GrandFinalFormat")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<int>("GroupCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("GroupStageKind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("GroupStageMatchFormat")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("LowerBracketFormat")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("PlayoffKind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("PlayoffSize")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PublicToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("SwissRounds")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("ThirdPlaceEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("TiebreakerPolicy")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("UpperBracketFormat")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<byte[]>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicToken")
+                        .IsUnique();
+
+                    b.ToTable("tournaments", "tournament");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.UnmatchedScoreboard", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("FiukWins")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LanyokWins")
+                        .HasColumnType("int");
+
+                    b.Property<string>("LastVictor")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("unmatched_scoreboard", "tournament");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
                 {
                     b.Property<int>("Id")
@@ -369,6 +632,66 @@ namespace AdaManagement.Server.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Match", b =>
+                {
+                    b.HasOne("AdaManagement.Server.Tournaments.Domain.Entities.Tournament", null)
+                        .WithMany("Matches")
+                        .HasForeignKey("TournamentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Participant", b =>
+                {
+                    b.HasOne("AdaManagement.Server.Tournaments.Domain.Entities.Tournament", null)
+                        .WithMany("Participants")
+                        .HasForeignKey("TournamentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.ScoreEntry", b =>
+                {
+                    b.HasOne("AdaManagement.Server.Tournaments.Domain.Entities.Match", null)
+                        .WithMany("ScoreEntries")
+                        .HasForeignKey("MatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.UnmatchedScoreboard", b =>
+                {
+                    b.OwnsMany("AdaManagement.Server.Tournaments.Domain.Entities.UnmatchedPick", "Picks", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<string>("Character")
+                                .IsRequired()
+                                .HasMaxLength(60)
+                                .HasColumnType("nvarchar(60)");
+
+                            b1.Property<string>("PlayerName")
+                                .IsRequired()
+                                .HasMaxLength(40)
+                                .HasColumnType("nvarchar(40)");
+
+                            b1.Property<Guid>("ScoreboardId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("ScoreboardId");
+
+                            b1.ToTable("unmatched_picks", "tournament");
+
+                            b1.WithOwner()
+                                .HasForeignKey("ScoreboardId");
+                        });
+
+                    b.Navigation("Picks");
+                });
+
             modelBuilder.Entity("AdaManagement.Server.Domain.RecurringTemplate", b =>
                 {
                     b.Navigation("Log");
@@ -379,6 +702,18 @@ namespace AdaManagement.Server.Data.Migrations
                     b.Navigation("Checklist");
 
                     b.Navigation("Story");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Match", b =>
+                {
+                    b.Navigation("ScoreEntries");
+                });
+
+            modelBuilder.Entity("AdaManagement.Server.Tournaments.Domain.Entities.Tournament", b =>
+                {
+                    b.Navigation("Matches");
+
+                    b.Navigation("Participants");
                 });
 #pragma warning restore 612, 618
         }

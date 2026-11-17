@@ -1,0 +1,40 @@
+@* Kieséses versenyek végeredménye: helyezés-sávok (1., 2., 3–4., …) a résztvevőkkel. A sáv helye az ágból
+   már a meccsek előtt ismert; amíg senki nem került oda, „még nem dőlt el”. *@
+@if (Groups.Count == 0)
+{
+    <div class="tr-hint">Még nincs végeredmény.</div>
+}
+else
+{
+    <ol class="tr-places">
+        @foreach (var g in Groups)
+        {
+            <li class="@($"tr-place{Medal(g.RankStart)}")">
+                <span class="tr-place-rank">
+                    @if (g.RankStart <= 3)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.EmojiEvents" Size="Size.Small" />
+                    }
+                    @(g.RankStart == g.RankEnd ? $"{g.RankStart}." : $"{g.RankStart}–{g.RankEnd}.")
+                </span>
+                <span class="tr-place-label">@g.Label</span>
+                <span class="tr-place-who">
+                    @if (g.Participants.Count == 0)
+                    {
+                        <span class="tr-pl-pending">még nem dőlt el</span>
+                    }
+                    @foreach (var p in g.Participants)
+                    {
+                        <ParticipantLabel Name="@p.Name" Emoji="@p.Emoji" />
+                    }
+                </span>
+            </li>
+        }
+    </ol>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<PlacementGroupDto> Groups { get; set; } = [];
+
+    private static string Medal(int rank) => rank switch { 1 => " gold", 2 => " silver", 3 => " bronze", _ => "" };
+}

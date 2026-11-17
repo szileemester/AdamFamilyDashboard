@@ -1,0 +1,108 @@
+@page "/unmatched"
+@using AdaManagement.Client.Components.Unmatched
+@inject ApiClient Api
+@inject IDialogService Dialogs
+
+@* A házi Unmatched pontozótábla képregényborítóként: a két csapat, ki mivel játszik, az összesített győzelmek és
+   korona annak, aki az utolsó meccset vitte. A menüben nem szerepel; olvasni bárki tudja a linkkel, írni csak
+   bejelentkezve. A szerkesztő a VS-jelvény 5 gyors koppintására nyílik (szándékosan rejtve, nem védelemként). *@
+<PageTitle>Unmatched – Adam's family dashboard</PageTitle>
+
+<div class="um-page">
+    @if (_board is not { } b)
+    {
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error">@_error</MudAlert>
+        }
+        else
+        {
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        }
+    }
+    else
+    {
+        <div class="um-arena">
+            @foreach (var team in UnmatchedArt.Teams)
+            {
+                <div class="@($"um-field {team.CssClass}")" style="@FieldStyle(team)">
+                    <div class="@($"um-band {(team.Leading ? "leading" : "trailing")}")" style="@BandStyle">
+                        <div class="um-banner">@team.Label</div>
+                        <div class="um-cards">
+                            @foreach (var player in team.Players)
+                            {
+                                var character = b.Picks.FirstOrDefault(p => p.PlayerName == player)?.Character;
+                                var art = UnmatchedArt.ArtFor(character);
+                                <div class="um-card" @key="player">
+                                    <div class="um-frame">
+                                        @if (art is not null)
+                                        {
+                                            <img src="@art" alt="@character" fetchpriority="high" />
+                                        }
+                                        else
+                                        {
+                                            <span class="um-unknown">?</span>
+                                        }
+                                    </div>
+                                    <div class="um-player">@player</div>
+                                    @* Ha a tárolt karakternek már nincs képe, az áthúzás jelzi, hogy újra kell választani. *@
+                                    <div class="@($"um-character{(character is not null && art is null ? " missing" : "")}")">@(character ?? "nincs megadva")</div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+            <div class="um-bolt" style="@BoltStyle"></div>
+            <div class="um-center">
+                <div class="um-vs" @onclick="SecretTap" style="@($"--burst:{UnmatchedArt.BurstClip}")">
+                    <div class="um-burst ink"></div>
+                    <div class="um-burst fire"></div>
+                    <span>VS</span>
+                </div>
+                <div class="um-score">
+                    <MudIcon Icon="@Icons.Material.Filled.EmojiEvents" Class="@Crown(UnmatchedTeam.Fiuk)" />
+                    <span>@b.FiukWins</span>
+                    <span class="um-dash">–</span>
+                    <span>@b.LanyokWins</span>
+                    <MudIcon Icon="@Icons.Material.Filled.EmojiEvents" Class="@Crown(UnmatchedTeam.Lanyok)" />
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const int SecretTaps = 5;
+    private static readonly TimeSpan SecretWindow = TimeSpan.FromMilliseconds(1500);
+
+    private static readonly string BandStyle = $"--extent:{UnmatchedArt.ContentExtent}";
+    private static readonly string BoltStyle = $"--clip-h:{UnmatchedArt.BoltClip(false)};--clip-v:{UnmatchedArt.BoltClip(true)}";
+
+    private UnmatchedScoreboardDto? _board;
+    private string? _error;
+    private int _taps;
+    private DateTime _lastTap;
+
+    private static string FieldStyle(UnmatchedArt.Team t) =>
+        $"--clip-h:{UnmatchedArt.FieldClip(false, t.Leading)};--clip-v:{UnmatchedArt.FieldClip(true, t.Leading)}";
+
+    private string Crown(UnmatchedTeam team) => $"um-crown{(_board?.LastVictor == team ? "" : " hidden")}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _board = await Api.GetAsync<UnmatchedScoreboardDto>("api/public/unmatched"); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    /// <summary>Öt koppintás, legfeljebb 1,5 mp szünettel: nyílik a szerkesztő. A lassú, magányos koppintás nem számít.</summary>
+    private async Task SecretTap()
+    {
+        var now = DateTime.UtcNow;
+        _taps = now - _lastTap > SecretWindow ? 1 : _taps + 1;
+        _lastTap = now;
+        if (_taps < SecretTaps || _board is null) return;
+        _taps = 0;
+        if (await UnmatchedEditorDialog.ShowAsync(Dialogs, _board) is { } saved) _board = saved;
+    }
+}

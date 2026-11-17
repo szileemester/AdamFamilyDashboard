@@ -1,0 +1,164 @@
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+
+@* A névsor szerkesztése (az Adaminator ParticipantsSectionje): előbb a létszám, aztán a megjelenő sorok kitöltése,
+   végül egy gombbal az egész névsor mentése egy kérésben. Mentésig minden helyi: egy sor tehát nem azonos egy mentett
+   résztvevővel, ezért saját kulcsot, piszkozatnevet és -emojit visz, plusz annak a résztvevőnek az azonosítóját, akiből
+   lett (új sornál null). A szerver számolja ki a létrehozást, átnevezést és törlést egy tranzakcióban. *@
+<section class="tr-panel">
+    <div class="tr-panel-head">
+        <h2 class="tr-panel-title">Résztvevők</h2>
+        <span class="@($"tr-pill {(Participants.Count >= MinPanels ? "ok" : "warn")}")">@Participants.Count / @TournamentLimits.MaxParticipants</span>
+    </div>
+
+    <MudNumericField T="int" Value="_slots.Count" ValueChanged="SetPanelCount" Label="Játékosok száma"
+                     Min="MinPanels" Max="TournamentLimits.MaxParticipants" Variant="Variant.Outlined" Margin="Margin.Dense"
+                     Disabled="_busy" Class="tr-count-field" />
+
+    <div class="tr-slots">
+        @for (var i = 0; i < _slots.Count; i++)
+        {
+            var slot = _slots[i];
+            var position = i + 1;
+            var blank = slot.Touched && string.IsNullOrWhiteSpace(slot.Name);
+            <div class="tr-slot" @key="slot.Key">
+                <MudTextField T="string" Value="slot.Name" ValueChanged="v => Edit(() => slot.Name = v ?? string.Empty)"
+                              Placeholder="@($"{position}. játékos")" Immediate="true" MaxLength="TournamentLimits.ParticipantNameMaxLength"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                              Error="blank" ErrorText="Add meg a nevet." OnBlur="() => slot.Touched = true"
+                              UserAttributes="@(new() { ["aria-label"] = $"{position}. játékos neve" })" />
+                <EmojiPicker Value="@slot.Emoji" ValueChanged="e => Edit(() => slot.Emoji = e)" Disabled="_busy" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" Disabled="_busy"
+                               OnClick="() => Remove(slot)" aria-label="@($"{position}. játékos törlése")" title="Törlés" />
+            </div>
+        }
+    </div>
+
+    <div class="tr-panel-actions">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Done" OnClick="Save" Disabled="!CanSave">
+            Névsor rögzítése
+        </MudButton>
+        @if (Blanks > 0)
+        {
+            <span class="tr-warn">Még @Blanks sor név nélkül áll; ehhez a versenyhez legalább @MinPanels résztvevő kell.</span>
+        }
+        else if (Unsaved)
+        {
+            <span class="tr-warn">Mentetlen változás: a „Névsor rögzítése” gombig semmi sem tárolódik.</span>
+        }
+    </div>
+
+    @if (Participants.Count >= MinPanels && TournamentText.RequiredByes(Participants.Count, Type) is var byes and > 0)
+    {
+        <div class="tr-hint">@Participants.Count résztvevőhöz az ágban @byes erőnyerő kell (ők az első fordulót kihagyják).</div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid TournamentId { get; set; }
+    [Parameter, EditorRequired] public TournamentType Type { get; set; }
+
+    /// <summary>A beállításokkal induló legkisebb létszám (a szerver számolja: TournamentDto.MinParticipants).</summary>
+    [Parameter] public int MinPanels { get; set; } = TournamentLimits.MinParticipants;
+
+    /// <summary>A mentett névsor.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<ParticipantDto> Participants { get; set; } = [];
+
+    /// <summary>Mentés után a szerver által visszaadott névsor.</summary>
+    [Parameter] public EventCallback<IReadOnlyList<ParticipantDto>> OnSaved { get; set; }
+
+    /// <summary>Jelzi, ha a sorok eltérnek a mentett névsortól (ilyenkor nem lehet kiemelni vagy indítani).</summary>
+    [Parameter] public EventCallback<bool> UnsavedChanged { get; set; }
+
+    private sealed class Slot
+    {
+        public Guid Key { get; } = Guid.NewGuid();
+        public Guid? Id { get; init; }
+        public string Name { get; set; } = string.Empty;
+        public string? Emoji { get; set; }
+        public bool Touched { get; set; }
+    }
+
+    private List<Slot> _slots = [];
+    private IReadOnlyList<ParticipantDto>? _mirrored;
+    private bool _edited, _busy, _reportedUnsaved;
+
+    private int Blanks => _slots.Count(s => string.IsNullOrWhiteSpace(s.Name));
+
+    /// <summary>
+    /// Eltérés a mentett névsortól (név, emoji, sorrend, tagság). Az üres sor is eltérés, így egy új verseny
+    /// rögtön mentetlennek számít, és nem indítható.
+    /// </summary>
+    private bool Unsaved => _slots.Count != Participants.Count
+                            || _slots.Where((s, i) => s.Id != Participants[i].Id || s.Name.Trim() != Participants[i].Name || s.Emoji != Participants[i].Emoji).Any();
+
+    // Nincs üres sor és a sorok száma nem mehet a minimum alá, így ez a kettő együtt a „van elég” feltétel is.
+    private bool CanSave => !_busy && Unsaved && Blanks == 0;
+
+    protected override void OnParametersSet()
+    {
+        // A mentett névsort a sorokba tükrözi, de mentetlen szerkesztés fölé soha.
+        if (!ReferenceEquals(_mirrored, Participants) && !_edited)
+        {
+            _slots = PadToMinimum(Participants.Select(p => new Slot { Id = p.Id, Name = p.Name, Emoji = p.Emoji }).ToList());
+            _mirrored = Participants;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var unsaved = Unsaved;
+        if (unsaved != _reportedUnsaved || firstRender)
+        {
+            _reportedUnsaved = unsaved;
+            await UnsavedChanged.InvokeAsync(unsaved);
+        }
+    }
+
+    private List<Slot> PadToMinimum(List<Slot> slots)
+    {
+        while (slots.Count < MinPanels) slots.Add(new Slot());
+        return slots;
+    }
+
+    private void Edit(Action change)
+    {
+        _edited = true;
+        change();
+    }
+
+    /// <summary>A sorok számát a megadottra vágja vagy bővíti (a szerveren semmi sem törlődik a mentésig).</summary>
+    private void SetPanelCount(int target)
+    {
+        var n = Math.Clamp(target, MinPanels, TournamentLimits.MaxParticipants);
+        if (n == _slots.Count) return;
+        Edit(() => _slots = PadToMinimum(_slots.Take(n).ToList()));
+        while (_slots.Count < n) _slots.Add(new Slot());
+    }
+
+    /// <summary>A minimumnál a törölt sor helyén üres sor marad, hogy a névsor ne fogyjon az indítható alá.</summary>
+    private void Remove(Slot slot) => Edit(() => _slots = PadToMinimum(_slots.Where(s => s != slot).ToList()));
+
+    private async Task Save()
+    {
+        // Kis- és nagybetűtől függetlenül egyedi nevek, ahogy a domain is megköveteli.
+        var dup = _slots.GroupBy(s => s.Name.Trim(), StringComparer.CurrentCultureIgnoreCase).FirstOrDefault(g => g.Count() > 1);
+        if (dup is not null)
+        {
+            Snackbar.Add($"Két játékos neve is „{dup.Key}”.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var saved = await Api.PutAsync<List<ParticipantDto>>($"api/tournaments/{TournamentId}/participants",
+                new ReplaceRosterRequest(_slots.Select(s => new RosterEntryRequest(s.Id, s.Name.Trim(), s.Emoji)).ToList()));
+            _edited = false;
+            await OnSaved.InvokeAsync(saved);
+            Snackbar.Add("A névsor elmentve.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

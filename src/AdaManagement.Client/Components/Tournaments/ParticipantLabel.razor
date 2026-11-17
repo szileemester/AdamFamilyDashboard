@@ -1,0 +1,20 @@
+@* Egy résztvevő emojival és névvel; mindenhol ez jelenik meg (ág, csoportok, tabellák), így egységes.
+   Üres hely (még senki nem jutott ide) emoji nélkül, „?” névvel. A hosszú név három ponttal rövidül. *@
+<span class="@($"tr-pl {Class}")">
+    @if (Name is null)
+    {
+        <span class="tr-pl-name tr-pl-pending">?</span>
+    }
+    else
+    {
+        <span class="tr-pl-emoji" aria-hidden="true">@(Emoji ?? TournamentText.DefaultEmoji)</span>
+        <span class="tr-pl-name">@Name</span>
+    }
+</span>
+
+@code {
+    /// <summary>Null, ha a hely még üres.</summary>
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Emoji { get; set; }
+    [Parameter] public string? Class { get; set; }
+}
