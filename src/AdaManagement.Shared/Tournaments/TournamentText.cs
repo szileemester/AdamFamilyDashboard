@@ -61,6 +61,23 @@ public static class TournamentText
         _ => kind.ToString(),
     };
 
+    /// <summary>A verseny állapotának CSS-osztálya (kártya, címke).</summary>
+    public static string CssClass(this TournamentStatus status) => status switch
+    {
+        TournamentStatus.Running => "running",
+        TournamentStatus.Planned => "planned",
+        _ => "finished",
+    };
+
+    /// <summary>Eldőlt meccs: lezárva vagy feladással.</summary>
+    public static bool IsDecided(this MatchStatus status) => status is MatchStatus.Completed or MatchStatus.Forfeit;
+
+    /// <summary>A forduló minden meccse eldőlt.</summary>
+    public static bool IsDecided(this BracketRoundDto round) => round.Matches.All(m => m.Status.IsDecided());
+
+    /// <summary>„emoji név” szövegben (párbeszédablakok); emoji nélkül az alapértelmezett, mint a ParticipantLabel-nél.</summary>
+    public static string DisplayName(string name, string? emoji) => $"{emoji ?? DefaultEmoji} {name}";
+
     /// <summary>0-tól számozott csoport neve: „A csoport”, „B csoport”…</summary>
     public static string GroupLabel(int groupIndex) => $"{(char)('A' + groupIndex)} csoport";
 
@@ -79,9 +96,7 @@ public static class TournamentText
 
     /// <summary>Ennyi erőnyerő kell az első fordulóban (körmérkőzésnél és csoportkörnél soha).</summary>
     public static int RequiredByes(int participantCount, TournamentType type) =>
-        type is TournamentType.RoundRobin or TournamentType.GroupStagePlayoff || participantCount < 2
-            ? 0
-            : BracketSize(participantCount, type) - participantCount;
+        participantCount < 2 ? 0 : BracketSize(participantCount, type) - participantCount;
 }
 
 /// <summary>

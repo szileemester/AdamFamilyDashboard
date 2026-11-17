@@ -24,6 +24,14 @@ public class TournamentRepository : ITournamentRepository
             .AsSplitQuery()
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
 
+    public Task<Tournament?> GetForReadAsync(Guid id, bool withMatches, CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.Tournaments.AsNoTracking().Include(t => t.Participants);
+        return withMatches
+            ? query.Include(t => t.Matches).ThenInclude(m => m.ScoreEntries).AsSplitQuery().FirstOrDefaultAsync(t => t.Id == id, cancellationToken)
+            : query.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+    }
+
     public Task<Tournament?> GetByPublicTokenAsync(string publicToken, CancellationToken cancellationToken = default) =>
         _dbContext.Tournaments
             .AsNoTracking()

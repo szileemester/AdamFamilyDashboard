@@ -30,8 +30,7 @@
     private bool IsRoundRobin => Bracket.Type == TournamentType.RoundRobin;
     private bool IsGroupStage => Bracket.Type == TournamentType.GroupStagePlayoff && Bracket.GroupStage is not null;
 
-    private static bool RoundDecided(BracketRoundDto r) => r.Matches.All(m => m.Status is MatchStatus.Completed or MatchStatus.Forfeit);
-    private bool TiebreakersPending => !Bracket.TiebreakerRounds.All(RoundDecided);
+    private bool TiebreakersPending => !Bracket.TiebreakerRounds.All(r => r.IsDecided());
 
     protected override void OnParametersSet()
     {
@@ -85,17 +84,13 @@
 
     private RenderFragment MainPanel => __builder =>
     {
-        if (Bracket.Type == TournamentType.DoubleElimination)
-        {
-            <PlayoffGrid WinnerRounds="Bracket.WinnerRounds" LoserRounds="Bracket.LoserRounds" GrandFinal="Bracket.GrandFinal" OnSelect="OnSelect" />
-        }
-        else if (IsRoundRobin)
+        if (IsRoundRobin)
         {
             <RoundColumns Rounds="Bracket.WinnerRounds" OnSelect="OnSelect" />
         }
         else
         {
-            <BracketTree Rounds="Bracket.WinnerRounds" ThirdPlace="Bracket.ThirdPlace" OnSelect="OnSelect" />
+            @Elimination(Bracket.Type == TournamentType.SingleElimination)
         }
     };
 
@@ -105,7 +100,16 @@
         {
             <div class="tr-hint">A rájátszás ága a csoportkör végén, a „Rájátszás indítása” gombbal jön létre.</div>
         }
-        else if (Bracket.GroupStage!.PlayoffKind == PlayoffKind.SingleElimination)
+        else
+        {
+            @Elimination(Bracket.GroupStage!.PlayoffKind == PlayoffKind.SingleElimination)
+        }
+    };
+
+    /// <summary>Kieséses ág: egyenesnél fa (bronzmeccsel), duplánál győztes/vesztes ág és nagydöntő.</summary>
+    private RenderFragment Elimination(bool single) => __builder =>
+    {
+        if (single)
         {
             <BracketTree Rounds="Bracket.WinnerRounds" ThirdPlace="Bracket.ThirdPlace" OnSelect="OnSelect" />
         }

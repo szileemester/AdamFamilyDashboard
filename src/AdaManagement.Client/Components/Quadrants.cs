@@ -42,6 +42,12 @@ public static class Format
         catch { return null; }
     }
 
+    /// <summary>Szám inline CSS-be (pont tizedesjellel, legfeljebb két tizedes).</summary>
+    public static string CssNum(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Egy pixeles CSS-deklaráció, pl. „top:12.5px;”.</summary>
+    public static string CssPx(string prop, double v) => $"{prop}:{CssNum(v)}px;";
+
     /// <summary>Budapesti helyi idő.</summary>
     public static DateTime Now => Budapest is null ? DateTime.Now : TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Budapest);
 

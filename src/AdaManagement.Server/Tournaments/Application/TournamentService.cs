@@ -105,7 +105,7 @@ public class TournamentService
 
     public async Task<TournamentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var tournament = await _repository.GetByIdAsync(id, cancellationToken);
+        var tournament = await _repository.GetForReadAsync(id, withMatches: false, cancellationToken);
         return tournament?.ToDto();
     }
 

@@ -1,5 +1,5 @@
 @* A verseny állapota kis címkeként: Fut (zöld), Tervezett (sárga), Befejezett (halvány). *@
-<span class="@($"tr-status {Status.ToString().ToLowerInvariant()}")">@Status.Label()</span>
+<span class="@($"tr-status {Status.CssClass()}")">@Status.Label()</span>
 
 @code {
     [Parameter, EditorRequired] public TournamentStatus Status { get; set; }

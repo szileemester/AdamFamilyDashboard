@@ -40,7 +40,7 @@
                                 {
                                     <span class="tr-pill bye">erőnyerő</span>
                                 }
-                                else if (m.Status is MatchStatus.Completed or MatchStatus.Forfeit)
+                                else if (m.Status.IsDecided())
                                 {
                                     <span>@m.AggregateScoreA – @m.AggregateScoreB</span>
                                     @if (m.Status == MatchStatus.Forfeit)
@@ -80,11 +80,8 @@
     /// <summary>Csak a kézi nyitás/csukás marad meg; minden más az eredményeket követi.</summary>
     private readonly Dictionary<int, bool> _overrides = [];
 
-    private static bool Decided(BracketRoundDto r) =>
-        r.Matches.All(m => m.Status is MatchStatus.Completed or MatchStatus.Forfeit);
-
     private bool IsOpen(BracketRoundDto r) =>
-        _overrides.TryGetValue(r.Round, out var open) ? open : !(CollapseDecidedRounds && Decided(r));
+        _overrides.TryGetValue(r.Round, out var open) ? open : !(CollapseDecidedRounds && r.IsDecided());
 
     private void Toggle(BracketRoundDto r, bool open)
     {

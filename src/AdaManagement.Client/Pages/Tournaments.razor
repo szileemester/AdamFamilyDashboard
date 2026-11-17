@@ -23,7 +23,7 @@
         @if (_items is { Count: > 0 })
         {
             <div class="hero-meta">
-                @foreach (var (status, _) in Sections)
+                @foreach (var status in Sections)
                 {
                     var n = _items.Count(t => t.Status == status);
                     if (n > 0)
@@ -56,7 +56,7 @@ else
     {
         <div class="sub-empty">Nincs ilyen nevű verseny: „@_query”.</div>
     }
-    @foreach (var (status, title) in Sections)
+    @foreach (var status in Sections)
     {
         var items = filtered.Where(t => t.Status == status).ToList();
         if (items.Count == 0) continue;
@@ -65,20 +65,20 @@ else
         @if (finished)
         {
             <button type="button" class="sub-section tr-toggle" @onclick="() => _showFinished = !_showFinished" aria-expanded="@(!collapsed)">
-                @title <span class="tr-count">@items.Count</span>
+                @status.Label() <span class="tr-count">@items.Count</span>
                 <MudIcon Icon="@(collapsed ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ExpandLess)" />
             </button>
         }
         else
         {
-            <div class="sub-section">@title <span class="tr-count">@items.Count</span></div>
+            <div class="sub-section">@status.Label() <span class="tr-count">@items.Count</span></div>
         }
         @if (!collapsed)
         {
             <div class="tr-grid">
                 @foreach (var t in items)
                 {
-                    <a class="@($"tr-card {StatusClass(t.Status)}")" href="@($"versenyek/{t.Id}")">
+                    <a class="@($"tr-card {t.Status.CssClass()}")" href="@($"versenyek/{t.Id}")">
                         <MudIcon Icon="@TypeIcon(t.Type)" Class="tr-art" aria-hidden="true" />
                         <div class="tr-card-top">
                             <div class="tr-card-name">@t.Name</div>
@@ -97,12 +97,7 @@ else
 }
 
 @code {
-    private static readonly (TournamentStatus Status, string Title)[] Sections =
-    [
-        (TournamentStatus.Running, "Fut"),
-        (TournamentStatus.Planned, "Tervezett"),
-        (TournamentStatus.Finished, "Befejezett"),
-    ];
+    private static readonly TournamentStatus[] Sections = [TournamentStatus.Running, TournamentStatus.Planned, TournamentStatus.Finished];
 
     private List<TournamentSummaryDto>? _items;
     private string? _query;
@@ -118,13 +113,6 @@ else
     {
         if (await TournamentFormDialog.ShowAsync(Dialogs, null) is { } created) Nav.NavigateTo($"versenyek/{created.Id}");
     }
-
-    private static string StatusClass(TournamentStatus s) => s switch
-    {
-        TournamentStatus.Running => "running",
-        TournamentStatus.Planned => "planned",
-        _ => "finished",
-    };
 
     /// <summary>A kártya háttérikonja a versenytípusból.</summary>
     public static string TypeIcon(TournamentType type) => type switch

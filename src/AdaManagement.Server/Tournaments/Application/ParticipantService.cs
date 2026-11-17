@@ -15,7 +15,8 @@ public class ParticipantService
 
     public async Task<IReadOnlyList<ParticipantDto>> ListAsync(Guid tournamentId, CancellationToken cancellationToken = default)
     {
-        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        var tournament = await _repository.GetForReadAsync(tournamentId, withMatches: false, cancellationToken)
+            ?? throw new NotFoundException("A verseny nem található.");
         return tournament.Participants.ToOrderedDtos();
     }
 

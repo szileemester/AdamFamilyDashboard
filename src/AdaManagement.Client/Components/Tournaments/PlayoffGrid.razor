@@ -2,8 +2,8 @@
    jobbra a nagydöntő. A győztes ág fordulói oszlopot ugorhatnak, hogy a döntője a vesztes ág döntőjével egy vonalba
    kerüljön; a helyeket a BracketLayout.ComputePlayoffGrid számolja. A csoportkör + rájátszás is ezt használja. *@
 <div class="tr-tree-scroll" data-drag-scroll>
-    <div class="tr-grid-canvas" style="@Px("width", _grid.Width) @Px("height", _grid.Height)">
-        <svg class="tr-connector tr-grid-lines" width="@Num(_grid.Width)" height="@Num(_grid.Height)" aria-hidden="true">
+    <div class="tr-grid-canvas" style="@Format.CssPx("width", _grid.Width) @Format.CssPx("height", _grid.Height)">
+        <svg class="tr-connector tr-grid-lines" width="@Format.CssNum(_grid.Width)" height="@Format.CssNum(_grid.Height)" aria-hidden="true">
             @foreach (var d in _grid.Paths)
             {
                 <path d="@d" />
@@ -11,11 +11,11 @@
         </svg>
         @foreach (var h in _grid.Headers)
         {
-            <div class="tr-round-title tr-grid-head" style="@Px("left", h.X) @Px("top", h.Top) @Px("width", BracketTree.CardWidth)" title="@h.Title" @key="h.Key">@h.Title</div>
+            <div class="tr-round-title tr-grid-head" style="@Format.CssPx("left", h.X) @Format.CssPx("top", h.Top) @Format.CssPx("width", BracketTree.CardWidth)" title="@h.Title" @key="h.Key">@h.Title</div>
         }
         @foreach (var c in _grid.Cards)
         {
-            <div class="tr-grid-card" style="@Px("left", c.X) @Px("top", c.Y - BracketTree.CardHeight / 2) @Px("width", BracketTree.CardWidth)" @key="c.Match.Id">
+            <div class="tr-grid-card" style="@Format.CssPx("left", c.X) @Format.CssPx("top", c.Y - BracketTree.CardHeight / 2) @Format.CssPx("width", BracketTree.CardWidth)" @key="c.Match.Id">
                 <MatchCard Match="c.Match" HoveredId="_hovered" OnHover="id => _hovered = id" OnSelect="OnSelect" />
             </div>
         }
@@ -33,10 +33,16 @@
     private BracketLayout.PlayoffGridLayout _grid = new(0, 0, [], [], []);
     private Guid? _hovered;
 
-    protected override void OnParametersSet() =>
+    private (object?, object?, object?) _laidOut;
+
+    /// <summary>Az elrendezés csak új ág (új listák) esetén számolódik újra, nem minden szülő-újrarajzoláskor.</summary>
+    protected override void OnParametersSet()
+    {
+        var key = ((object?)WinnerRounds, (object?)LoserRounds, (object?)GrandFinal);
+        if (_laidOut.Item1 is not null && ReferenceEquals(key.Item1, _laidOut.Item1) && ReferenceEquals(key.Item2, _laidOut.Item2)
+            && ReferenceEquals(key.Item3, _laidOut.Item3)) return;
+        _laidOut = key;
         _grid = BracketLayout.ComputePlayoffGrid(WinnerRounds, LoserRounds, GrandFinal, BracketTree.CardWidth, BracketTree.CardHeight,
             BracketTree.Gap, BracketTree.ConnectorWidth, BracketTree.LabelHeight, SectionGap);
-
-    private static string Num(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-    private static string Px(string prop, double v) => $"{prop}:{Num(v)}px;";
+    }
 }

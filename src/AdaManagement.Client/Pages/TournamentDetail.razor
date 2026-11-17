@@ -216,8 +216,13 @@ else
         try
         {
             _tournament = await Api.GetAsync<TournamentDto>($"api/tournaments/{Id}");
-            _participants = await Api.GetAsync<List<ParticipantDto>>($"api/tournaments/{Id}/participants");
-            _bracket = _tournament.Status == TournamentStatus.Planned ? null : await Api.GetAsync<BracketDto>($"api/tournaments/{Id}/bracket");
+            // A névsor és az ág egymástól független, egyszerre kérjük őket.
+            var participants = Api.GetAsync<List<ParticipantDto>>($"api/tournaments/{Id}/participants");
+            var bracket = _tournament.Status == TournamentStatus.Planned
+                ? Task.FromResult<BracketDto?>(null)
+                : Api.GetAsync<BracketDto?>($"api/tournaments/{Id}/bracket");
+            _participants = await participants;
+            _bracket = await bracket;
         }
         catch (ApiException ex) when (ex.StatusCode == 404) { _notFound = true; }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }

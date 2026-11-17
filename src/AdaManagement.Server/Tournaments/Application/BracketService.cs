@@ -95,7 +95,8 @@ public class BracketService
 
     public async Task<BracketDto> GetBracketAsync(Guid tournamentId, CancellationToken cancellationToken = default)
     {
-        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        var tournament = await _repository.GetForReadAsync(tournamentId, withMatches: true, cancellationToken)
+            ?? throw new NotFoundException("A verseny nem található.");
         return BracketProjection.Build(tournament);
     }
 

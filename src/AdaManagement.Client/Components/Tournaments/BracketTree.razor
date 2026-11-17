@@ -14,25 +14,25 @@
             {
                 var index = ri;
                 var round = Rounds[ri];
-                <div class="tr-tree-col" style="@Px("width", CardWidth) @Px("height", ContainerHeight)">
+                <div class="tr-tree-col" style="@Format.CssPx("width", CardWidth) @Format.CssPx("height", ContainerHeight)">
                     @foreach (var match in round.Matches)
                     {
                         if (!_layout.Positions[index].TryGetValue(match.IndexInRound, out var y)) continue;
-                        <div class="tr-tree-card" style="@Px("top", y - CardHeight / 2)" @key="match.Id">
+                        <div class="tr-tree-card" style="@Format.CssPx("top", y - CardHeight / 2)" @key="match.Id">
                             <MatchCard Match="match" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" />
                         </div>
                     }
                     @if (index == Rounds.Count - 1 && ThirdPlace is not null)
                     {
-                        <div class="tr-round-title tr-tree-extra" style="@Px("top", ExtraLabelTop)">Bronzmeccs</div>
-                        <div class="tr-tree-card" style="@Px("top", ExtraLabelTop + LabelHeight)">
+                        <div class="tr-round-title tr-tree-extra" style="@Format.CssPx("top", ExtraLabelTop)">Bronzmeccs</div>
+                        <div class="tr-tree-card" style="@Format.CssPx("top", ExtraLabelTop + LabelHeight)">
                             <MatchCard Match="ThirdPlace" HoveredId="_hovered" OnHover="Hover" OnSelect="OnSelect" />
                         </div>
                     }
                 </div>
                 @if (index < Rounds.Count - 1)
                 {
-                    <svg class="tr-connector" width="@ConnectorWidth" height="@Num(ContainerHeight)" aria-hidden="true">
+                    <svg class="tr-connector" width="@ConnectorWidth" height="@Format.CssNum(ContainerHeight)" aria-hidden="true">
                         @foreach (var match in round.Matches)
                         {
                             if (!_layout.Positions[index].TryGetValue(match.IndexInRound, out var y)) continue;
@@ -63,11 +63,16 @@
 
     private double ContainerHeight => ThirdPlace is null ? _layout.TotalHeight : ExtraLabelTop + LabelHeight + CardHeight + 8;
 
-    protected override void OnParametersSet() =>
+    private IReadOnlyList<BracketRoundDto>? _laidOut;
+
+    /// <summary>A szülő minden újrarajzolása ide fut; az elrendezés csak új ág (új lista) esetén számolódik újra.</summary>
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Rounds, _laidOut)) return;
+        _laidOut = Rounds;
         _layout = BracketLayout.ComputeTree(Rounds, roundsAlwaysHalve: true, CardHeight, Gap);
+    }
 
     private void Hover(Guid? id) => _hovered = id;
 
-    private static string Num(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-    private static string Px(string prop, double v) => $"{prop}:{Num(v)}px;";
 }

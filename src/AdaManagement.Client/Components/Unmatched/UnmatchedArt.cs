@@ -57,13 +57,13 @@ public static class UnmatchedArt
         BurstPoint((i + 0.5) / Spikes.Length, BurstCore),
     }))})";
 
-    /// <summary>A két csapat és játékosaik. A Victor a szerver UnmatchedTeam értéke.</summary>
-    public sealed record Team(bool Leading, string Label, UnmatchedTeam Victor, string[] Players, string CssClass);
+    /// <summary>A két csapat és játékosaik.</summary>
+    public sealed record Team(bool Leading, string Label, string[] Players, string CssClass);
 
     public static readonly Team[] Teams =
     [
-        new(true, "Fiúk", UnmatchedTeam.Fiuk, ["Márk", "Ádám"], "fiuk"),
-        new(false, "Lányok", UnmatchedTeam.Lanyok, ["Berni", "Reni"], "lanyok"),
+        new(true, "Fiúk", ["Márk", "Ádám"], "fiuk"),
+        new(false, "Lányok", ["Berni", "Reni"], "lanyok"),
     ];
 
     public static readonly string[] AllPlayers = Teams.SelectMany(t => t.Players).ToArray();

@@ -11,6 +11,9 @@ public interface ITournamentRepository
 {
     Task<Tournament?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Read-only load (no change tracking); matches and games only when <paramref name="withMatches"/> is set.</summary>
+    Task<Tournament?> GetForReadAsync(Guid id, bool withMatches, CancellationToken cancellationToken = default);
+
     Task<Tournament?> GetByPublicTokenAsync(string publicToken, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Tournament>> GetAllAsync(CancellationToken cancellationToken = default);

@@ -18,7 +18,7 @@
     /// <summary>Kattintás egy meccsre (eredményrögzítés). Ha nincs megadva, a kártya csak olvasható.</summary>
     [Parameter] public EventCallback<BracketMatchDto> OnSelect { get; set; }
 
-    private bool Decided => Match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
+    private bool Decided => Match.Status.IsDecided();
     private bool Actionable => OnSelect.HasDelegate && Match.ParticipantA is not null && Match.ParticipantB is not null;
     private string CardClass => $"tr-match{(Actionable ? " actionable" : "")}{(Match.Status == MatchStatus.InProgress ? " live" : "")}";
 

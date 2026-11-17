@@ -4,6 +4,7 @@
 @* Egy meccs eredményének rögzítése (az Adaminator MatchResultDialog-ja). A játszmák sorban töltődnek: egy korábbi
    játszma módosítása eldobja a későbbieket. A formátum és a számolás módja a verseny beállításaiból jön, itt nem
    változik. Eldőlt meccsnél csak az eredmény látszik, és ha ez az utolsó eldőlt meccs, visszavonható. *@
+@{ var progress = Progress; }
 <MudDialog>
     <TitleContent>
         <div class="tr-result-title">
@@ -41,7 +42,7 @@
                 {
                     var index = i;
                     var slot = SlotAt(i);
-                    var enabled = i < Progress.EnabledCount;
+                    var enabled = i < progress.EnabledCount;
                     <div class="@($"tr-game{(enabled ? "" : " off")}")">
                         <span class="tr-game-no">@(i + 1).<span class="tr-game-word"> játszma</span></span>
                         @if (Match.ScoreType == ScoreType.Points)
@@ -70,7 +71,7 @@
                 }
             </div>
             <div class="tr-hint mt-2">
-                Állás: <b>@Progress.WinsA – @Progress.WinsB</b>
+                Állás: <b>@progress.WinsA – @progress.WinsB</b>
                 @(Match.MatchFormat.AllowsDraw()
                     ? $" (mind a {MaxGames} játszma lemegy, {MaxGames / 2}–{MaxGames / 2} döntetlen)"
                     : $" ({Match.MatchFormat.RequiredWins()} nyert játszma kell a győzelemhez)")
@@ -98,7 +99,7 @@
         {
             <MudButton Disabled="_busy" OnClick="Close">Mégse</MudButton>
             <MudButton Disabled="@(_busy || !_dirty)" OnClick="Save">Mentés</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || !Progress.CanComplete)" OnClick="Complete">Lezárás</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || !progress.CanComplete)" OnClick="Complete">Lezárás</MudButton>
         }
     </DialogActions>
 </MudDialog>
@@ -121,13 +122,13 @@
     /// <summary>A szerver legutóbbi válasza: ha van, a szülő ezzel frissíti az ágat bezáráskor.</summary>
     private BracketDto? _latest;
 
-    private bool Decided => Match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
+    private bool Decided => Match.Status.IsDecided();
     private int MaxGames => Match.MatchFormat.MaxGames();
     private string NameA => Display(Match.ParticipantA);
     private string NameB => Display(Match.ParticipantB);
     private string WinnerName => Match.WinnerId == Match.ParticipantA?.ParticipantId ? NameA : NameB;
 
-    private static string Display(BracketSlotDto? s) => s is null ? "?" : s.Emoji is null ? s.Name : $"{s.Emoji} {s.Name}";
+    private static string Display(BracketSlotDto? s) => s is null ? "?" : TournamentText.DisplayName(s.Name, s.Emoji);
 
     /// <summary>Az üres játszma: pontos számolásnál 0–0 (döntetlen, így nem számít kitöltöttnek), egyébként üres.</summary>
     private Slot Blank => Match.ScoreType == ScoreType.Points ? new Slot(0, 0, null) : new Slot(null, null, null);
