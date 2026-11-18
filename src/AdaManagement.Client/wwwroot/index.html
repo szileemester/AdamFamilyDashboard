@@ -37,7 +37,17 @@
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <script src="js/interactions.js"></script>
-    <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
+    <script>
+        // Új verzió telepítésekor egyszer újratölt, hogy ne a régi, gyorsítótárazott app fusson tovább.
+        // Első telepítéskor (még nem volt service worker) nincs újratöltés.
+        (() => {
+            const sw = navigator.serviceWorker;
+            if (!sw) return;
+            let reload = !!sw.controller;
+            sw.addEventListener('controllerchange', () => { if (reload) { reload = false; location.reload(); } });
+            sw.register('service-worker.js', { updateViaCache: 'none' });
+        })();
+    </script>
 </body>
 
 </html>

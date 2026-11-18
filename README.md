@@ -21,7 +21,7 @@ Egyfelhasználós, ingyenesen hosztolt app. Androidon PWA-ként fut, weben böng
   (2 játszmánál döntetlen is lehet), játszmás vagy pontos számolás. Eredményrögzítés játszmánként, feladás, az utolsó
   eldőlt meccs visszavonása, holtverseny-meccsek, végeredmény, tabellák.
   Minden versenynek van **nyilvános, csak olvasható nézői linkje** (`/nezo/{token}`, bejelentkezés nélkül).
-- **Unmatched** (`/unmatched`, a menüben nincs): a házi Unmatched pontozótábla képregényborítóként, Fiúk – Lányok.
+- **Unmatched** (`/unmatched`): a házi Unmatched pontozótábla képregényborítóként, Fiúk – Lányok.
   Bárki megnézheti a linkkel; a szerkesztő a VS-jelvény 5 gyors koppintására nyílik, menteni csak bejelentkezve lehet.
 - **Témák**: Piros és Kék (mozgó háttér), Sötét és Világos (statikus). Eszközönként tárolódik.
 
@@ -54,6 +54,11 @@ Fontosabb döntések:
   tokennel, Unmatched tábla). Minden írás az `/api` alatt marad, bejelentkezéshez kötve.
 - **Karakterképek:** az Unmatched 32 képe (`wwwroot/characters/`) nincs a service worker előtöltésében, csak az oldal
   megnyitásakor töltődik.
+- **Hideg indulás:** F1-en nincs Always On, az SQL 60 perc után szünetel, és keep-alive pinget szándékosan nem
+  használunk. Helyette a szerver ReadyToRun módban fordul (gyorsabb indulás), és induláskor rögtön felébreszti az
+  adatbázist, hogy a két ébredés párhuzamosan menjen.
+- **Frissítés:** az új service worker azonnal átveszi az irányítást (`skipWaiting`), az oldal egyszer újratölt, így
+  egy push után nem marad a régi, gyorsítótárazott verzió.
 
 ## Helyi futtatás
 

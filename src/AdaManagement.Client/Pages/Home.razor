@@ -17,7 +17,7 @@
     else
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-        <MudText Typo="Typo.caption">Kapcsolódás a szerverhez… (alvó szervernél ez fél percig is tarthat)</MudText>
+        <MudText Typo="Typo.caption">Kapcsolódás a szerverhez… (alvás után ez akár egy percig is tarthat)</MudText>
     }
 }
 else
@@ -28,7 +28,7 @@ else
                   Icon="@Icons.Material.Filled.CloudSync">
             @if (_error is null)
             {
-                <span>Mentett állapot, frissítés folyamatban… (addig csak olvasható)</span>
+                <span>Mentett állapot. A szerver ébred (ingyenes csomag, alvás után akár egy perc), addig csak olvasható…</span>
             }
             else
             {

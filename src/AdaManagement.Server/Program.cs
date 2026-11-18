@@ -34,6 +34,21 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 
 var app = builder.Build();
 
+// Hideg indulás: az alvó Azure SQL ébredése (és az EF-modell felépítése) induljon el már most, a szerver indulásával
+// párhuzamosan, ne csak az első kéréskor. Nem időzített ping: csak akkor fut, amikor a szerver amúgy is felébred.
+app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
+{
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<AppDbContext>().Settings.AnyAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogInformation(ex, "Az adatbázis előzetes ébresztése nem sikerült; az első kérés újrapróbálja.");
+    }
+}));
+
 app.UseForwardedHeaders();
 
 // Biztonsági fejlécek minden válaszra: idegen oldal nem ágyazhatja be (clickjacking), nincs MIME-találgatás.

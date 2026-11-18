@@ -1,5 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <!-- Élesítéskor (publish -r linux-x64) előre fordított kód: rövidebb hideg indulás F1-en. Csak ebben a projektben,
+       a Blazor kliensre nem vonatkozhat. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\AdaManagement.Client\AdaManagement.Client.csproj" />
     <ProjectReference Include="..\AdaManagement.Shared\AdaManagement.Shared.csproj" />

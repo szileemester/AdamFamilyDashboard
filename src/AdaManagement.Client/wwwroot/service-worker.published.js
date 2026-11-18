@@ -18,6 +18,8 @@ const manifestUrlList = self.assetsManifest.assets.map(asset => new URL(asset.ur
 
 async function onInstall(event) {
     console.info('Service worker: Install');
+    // Az új verzió ne várjon arra, hogy az app minden lapja bezáruljon (az index.html egyszer újratölt, ha átvette).
+    self.skipWaiting();
 
     // Fetch and cache all matching items from the assets manifest
     const assetsRequests = self.assetsManifest.assets
@@ -35,6 +37,7 @@ async function onActivate(event) {
     await Promise.all(cacheKeys
         .filter(key => key.startsWith(cacheNamePrefix) && key !== cacheName)
         .map(key => caches.delete(key)));
+    await self.clients.claim();
 }
 
 async function onFetch(event) {

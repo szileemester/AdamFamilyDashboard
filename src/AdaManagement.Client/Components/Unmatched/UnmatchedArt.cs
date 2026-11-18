@@ -11,6 +11,13 @@ namespace AdaManagement.Client.Components.Unmatched;
 /// </summary>
 public static class UnmatchedArt
 {
+    /// <summary>Menüikon: két keresztbe tett kard (a Material ikonkészletben nincs kard), 24×24-es SVG-tartalom.</summary>
+    public const string SwordsIcon =
+        "<g transform=\"rotate(45 12 12)\">" + Sword + "</g><g transform=\"rotate(-45 12 12)\">" + Sword + "</g>";
+
+    private const string Sword =
+        "<polygon points=\"12,1.2 13.25,3.4 13.25,15 10.75,15 10.75,3.4\"/><rect x=\"8.3\" y=\"15\" width=\"7.4\" height=\"1.9\" rx=\"0.6\"/><rect x=\"11.15\" y=\"16.9\" width=\"1.7\" height=\"3.6\"/><circle cx=\"12\" cy=\"21.6\" r=\"1.35\"/>";
+
     /// <summary>A villám középvonala: [hossz menti %, keresztirányú %].</summary>
     private static readonly (double Along, double Centre)[] Bolt = [(0, 57), (20, 45), (38, 58), (56, 44), (76, 57), (100, 45)];
 
